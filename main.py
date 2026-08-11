@@ -6,6 +6,7 @@ import os
 import pathlib
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from sqlalchemy import func
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -52,9 +53,12 @@ def index():
     return FileResponse(BASE_DIR / "static" / "index.html")
 
 
+VERSION = "0.1"
+
+
 @app.get("/healthz")
 def healthz():
-    return {"ok": True, "model": MODEL}
+    return {"ok": True, "model": MODEL, "version": VERSION}
 
 
 # ── Copilot ───────────────────────────────────────────────────
@@ -648,17 +652,6 @@ def admin_purge_client(cid: int, adm: str = ADM):
 class AuthReq(BaseModel):
     email: str
     password: str
-    name: str = ""
-    code: str = ""
-
-
-@app.post("/api/auth/register")
-def api_register(req: AuthReq):
-    s = SessionLocal()
-    try:
-        return auth.register(s, req.email, req.password, req.name, req.code)
-    finally:
-        s.close()
 
 
 @app.post("/api/auth/login")
@@ -740,34 +733,13 @@ import secrets as _secrets
 def admin_agents(_: str = ADM):
     s = SessionLocal()
     try:
+        counts = dict(s.query(Client.agent_id, func.count(Client.id))
+                      .filter((Client.deleted == "") | (Client.deleted.is_(None)))
+                      .group_by(Client.agent_id).all())
         return [dict(id=a.id, email=a.email, name=a.name, role=a.role,
-                     active=bool(a.active), plan=a.plan, expires=a.expires or "")
-                for a in s.query(db.Agent).all()]
-    finally:
-        s.close()
-
-
-@app.get("/api/admin/invites")
-def admin_invites(_: str = ADM):
-    s = SessionLocal()
-    try:
-        return [dict(code=i.code, used_by=i.used_by, created=i.created, used=i.used)
-                for i in s.query(db.InviteCode).order_by(db.InviteCode.id.desc()).limit(30)]
-    finally:
-        s.close()
-
-
-@app.post("/api/admin/invites")
-def admin_make_invite(adm: str = ADM):
-    import datetime as _dt
-    s = SessionLocal()
-    try:
-        code = "HIV-" + _secrets.token_hex(3).upper()
-        s.add(db.InviteCode(code=code, created_by=adm,
-                            created=_dt.datetime.now().strftime("%Y-%m-%d %H:%M")))
-        db.audit(s, adm, "make_invite", code)
-        s.commit()
-        return dict(code=code)
+                     active=bool(a.active), plan=a.plan, expires=a.expires or "",
+                     agent_key=a.agent_key, clients=counts.get(a.agent_key, 0))
+                for a in s.query(db.Agent).order_by(db.Agent.id).all()]
     finally:
         s.close()
 
@@ -789,6 +761,91 @@ def admin_toggle(agent_id: int, req: ToggleReq, adm: str = ADM):
         db.audit(s, adm, "toggle_agent", f"{a.email}:{a.active}")
         s.commit()
         return dict(ok=True, active=bool(a.active))
+    finally:
+        s.close()
+
+
+class PasswordReq(BaseModel):
+    password: str
+
+
+@app.post("/api/admin/agents/{agent_id}/password")
+def admin_reset_password(agent_id: int, req: PasswordReq, adm: str = ADM):
+    """重置代理人密码。代理人忘密码时唯一的自救途径——以前只能手写 SQL。"""
+    s = SessionLocal()
+    try:
+        a = s.query(db.Agent).filter_by(id=agent_id).first()
+        if not a:
+            raise HTTPException(404, "账号不存在")
+        if len(req.password) < 8:
+            raise HTTPException(400, "密码至少 8 位")
+        salt = _secrets.token_hex(16)
+        a.pw_hash, a.salt = auth.hash_pw(req.password, salt), salt
+        db.audit(s, adm, "reset_password", a.email)
+        s.commit()
+        return {"ok": True}
+    finally:
+        s.close()
+
+
+class PlanReq(BaseModel):
+    plan: str = ""
+    expires: str = ""      # YYYY-MM-DD，空 = 不限期
+
+
+@app.post("/api/admin/agents/{agent_id}/plan")
+def admin_set_plan(agent_id: int, req: PlanReq, adm: str = ADM):
+    """设套餐和到期日。到期后登录和每个请求都会被挡，不用你记着手动停用。"""
+    s = SessionLocal()
+    try:
+        a = s.query(db.Agent).filter_by(id=agent_id).first()
+        if not a:
+            raise HTTPException(404, "账号不存在")
+        exp = req.expires.strip()
+        if exp:
+            try:
+                dt.date.fromisoformat(exp)
+            except ValueError:
+                raise HTTPException(400, "到期日格式应为 YYYY-MM-DD")
+        a.plan = req.plan.strip() or a.plan
+        a.expires = exp
+        db.audit(s, adm, "set_plan", f"{a.email}:{a.plan}:{exp or '不限期'}")
+        s.commit()
+        return dict(ok=True, plan=a.plan, expires=a.expires)
+    finally:
+        s.close()
+
+
+@app.get("/api/admin/audit")
+def admin_audit(agent_key: str = "", action: str = "", limit: int = 100,
+                _: str = ADM):
+    """审计日志。谁、什么时候、做了什么——PDPA/BNM 问起来要拿得出。"""
+    s = SessionLocal()
+    try:
+        q = s.query(db.Audit)
+        if agent_key:
+            q = q.filter(db.Audit.agent_id == agent_key)
+        if action:
+            q = q.filter(db.Audit.action == action)
+        rows = q.order_by(db.Audit.id.desc()).limit(min(limit, 500)).all()
+        names = dict(s.query(db.Agent.agent_key, db.Agent.email).all())
+        return [dict(id=r.id, ts=r.ts, agent_key=r.agent_id,
+                     agent=names.get(r.agent_id, r.agent_id),
+                     action=r.action, detail=r.detail) for r in rows]
+    finally:
+        s.close()
+
+
+@app.get("/api/admin/clients")
+def admin_clients(agent_key: str, _: str = ADM):
+    """按代理人列出客户——PDPA 删除请求要先找到人。"""
+    s = SessionLocal()
+    try:
+        return [dict(id=c.id, name=c.name, phone=c.phone,
+                     deleted=c.deleted or "",
+                     policies=sum(1 for p in c.policies if not p.deleted))
+                for c in s.query(Client).filter_by(agent_id=agent_key)
+                         .order_by(Client.id).all()]
     finally:
         s.close()
 

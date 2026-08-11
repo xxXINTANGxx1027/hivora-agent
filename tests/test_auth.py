@@ -83,7 +83,7 @@ def test_short_password_rejected(app_client, admin_token):
 
 
 def test_admin_endpoints_need_admin(app_client, demo_token):
-    for path in ("/api/admin/agents", "/api/admin/invites"):
+    for path in ("/api/admin/agents", "/api/admin/audit"):
         assert app_client.get(path, headers=H(demo_token)).status_code == 403
 
 

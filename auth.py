@@ -1,5 +1,7 @@
 """认证：email+密码登录，HMAC 签名 token（带过期），每请求校验账号状态，多租户隔离。
 
+closed SaaS：没有自助注册，账号一律由管理员在管理站创建。
+
 Token 格式：`agent_key.exp.sig`，sig = HMAC-SHA256(SECRET, "agent_key.exp")。
 每次请求都回库确认 active / expires —— 管理员点「停用」后，对方手里的 token 立刻失效。
 """
@@ -106,26 +108,6 @@ def _check_lock(email: str):
 def _note_fail(email: str):
     n, _ = _FAILS.get(email, (0, 0.0))
     _FAILS[email] = (n + 1, time.time() + _LOCK_SECS)
-
-
-def register(s, email: str, password: str, name: str, code: str = "") -> dict:
-    email = email.strip().lower()
-    if not email or len(password) < 8:
-        raise HTTPException(400, "邮箱必填，密码至少 8 位")
-    if s.query(db.Agent).filter_by(email=email).first():
-        raise HTTPException(400, "该邮箱已注册")
-    inv = s.query(db.InviteCode).filter_by(code=code.strip().upper(), used_by="").first()
-    if not inv:
-        raise HTTPException(403, "需要有效的邀请码（请联系管理员购买获取）")
-    salt = secrets.token_hex(16)
-    key = "ag_" + secrets.token_hex(8)
-    s.add(db.Agent(agent_key=key, email=email, name=name or email.split("@")[0],
-                   pw_hash=hash_pw(password, salt), salt=salt))
-    inv.used_by = email
-    inv.used = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-    db.audit(s, key, "register", email)
-    s.commit()
-    return dict(token=make_token(key), name=name or email.split("@")[0], role="agent")
 
 
 def login(s, email: str, password: str) -> dict:
