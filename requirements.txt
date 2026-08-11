@@ -11,3 +11,4 @@ psycopg2-binary==2.9.10
 pypdf==5.1.0
 python-multipart==0.0.20
 sentry-sdk==2.20.0
+cryptography==50.0.0

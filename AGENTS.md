@@ -41,6 +41,10 @@ Python + FastAPI + LangGraph + SQLAlchemy 后端，单文件 HTML SPA 前端。
 11. **列表接口**：一律用 `_capped(rows, 名字, aid)` 收口。截断要打日志——
     静默丢数据会让人以为"就这么多"。
 12. **聚合用 SQL**：统计类查询别把整表拉进内存再数（dashboard 原来就这么干的）。
+13. **Telegram**：每个代理人用自己的 bot（BotFather 建、token 填进来）。三条不能破：
+    token 用 Fernet 加密存、接口只回后 4 位；webhook 靠随机路径 + secret header 认身份；
+    **只有绑过的 chat_id 才回答业务问题**——bot 链接被转发出去不能变成越权入口。
+    从 Telegram 进来的提问一样走 `ask()`，合规节点、配额、审计全部照常。
 
 ## 架构速查
 - LangGraph 图：Supervisor(关键词fast-path+LLM路由) → policy/clientbook/drafting/action/chat/fallback → compliance

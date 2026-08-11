@@ -123,6 +123,13 @@
   @keyframes d{0%{content:"·"}33%{content:"··"}66%{content:"···"}}
   .hide{display:none}
   #trash-overlay:not(.hide){display:flex}
+  #tg-overlay:not(.hide){display:flex}
+  .step-n{display:inline-flex;width:19px;height:19px;border-radius:50%;
+    background:var(--hivora);color:#fff;font-size:11px;font-weight:700;
+    align-items:center;justify-content:center;margin-right:7px;flex-shrink:0}
+  .tg-code{font-family:ui-monospace,Menlo,monospace;font-size:21px;font-weight:700;
+    letter-spacing:.09em;color:var(--hivora-dark);background:var(--hivora-light);
+    border-radius:9px;padding:9px 15px;display:inline-block}
   #cust-overlay:not(.hide){display:flex}
   /* 页头：标题 + 右上角动作按钮 */
   .page-head{display:flex;justify-content:space-between;align-items:flex-start;
@@ -371,6 +378,9 @@
     <div class="page-head">
       <div><h1>训练 & 问 Hivora</h1>
         <div class="sub">左边教它（像教新员工）· 右边实时预览效果</div></div>
+      <div class="actions">
+        <button class="btn ghost" id="tg-btn" onclick="openTg()">✈️ 连接 Telegram</button>
+      </div>
     </div>
     <div class="gpts">
       <div class="col">
@@ -510,6 +520,21 @@
 </button>
 
 <!-- 新增弹窗 -->
+<div id="tg-overlay" class="hide" onclick="if(event.target===this)closeTg()"
+  style="position:fixed;inset:0;background:#111a;z-index:60;
+         align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--panel);border-radius:14px;max-width:520px;width:100%;
+              max-height:82vh;display:flex;flex-direction:column;overflow:hidden">
+    <div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;
+                align-items:center;gap:8px">
+      <b>✈️ 在 Telegram 里用 Hivora</b>
+      <button class="btn ghost" style="margin-left:auto;padding:5px 12px;font-size:12px"
+        onclick="closeTg()">关闭</button>
+    </div>
+    <div id="tg-body" style="overflow-y:auto;padding:16px 18px"></div>
+  </div>
+</div>
+
 <div id="trash-overlay" class="hide" onclick="if(event.target===this)closeTrash()"
   style="position:fixed;inset:0;background:#111a;z-index:60;
          align-items:center;justify-content:center;padding:20px">
@@ -577,7 +602,7 @@ const I18N={
   train_hint:"把产品、价格、规则告诉它——教过的知识会立刻用于右边预览和客户对话草拟。",
   teach_ph:"例如：CarePlus 360 月缴 RM250 起…",teach_btn:"教给它",
   ask_ph:"问条款 / 查客户 / 要话术 / 试刚教的知识…",send:"发送",
-  add_client:"＋ 新增客户",add_policy:"＋ 加保单",add_product:"＋ 新增产品",add_appt:"＋ 新增预约",trash:"🗑 回收站",
+  add_client:"＋ 新增客户",add_policy:"＋ 加保单",add_product:"＋ 新增产品",add_appt:"＋ 新增预约",trash:"🗑 回收站",tg_btn:"✈️ 连接 Telegram",
   k_clients:"客户",k_policies:"保单",k_renew:"30天内续保",k_pending:"待确认回复",
   k_ai:"AI 处理率",k_appts:"7天内预约",k_facts:"知识条数",
   s_clients:"client book",s_policies:"在保",s_renew:"要跟进",s_pending:"客户在等",
@@ -616,7 +641,7 @@ const I18N={
   train_hint:"Teach it products, prices and rules — everything is used instantly in the preview and client-chat drafts.",
   teach_ph:"e.g. CarePlus 360 from RM250/month…",teach_btn:"Teach",
   ask_ph:"Ask policy / clients / drafts / test what you taught…",send:"Send",
-  add_client:"＋ New Client",add_policy:"＋ Add Policy",add_product:"＋ New Product",add_appt:"＋ New Appointment",trash:"🗑 Trash",
+  add_client:"＋ New Client",add_policy:"＋ Add Policy",add_product:"＋ New Product",add_appt:"＋ New Appointment",trash:"🗑 Trash",tg_btn:"✈️ Connect Telegram",
   k_clients:"Clients",k_policies:"Policies",k_renew:"Renewals in 30d",k_pending:"Pending Replies",
   k_ai:"AI Handled",k_appts:"Appts in 7d",k_facts:"Knowledge",
   s_clients:"client book",s_policies:"active",s_renew:"to follow up",s_pending:"clients waiting",
@@ -694,6 +719,7 @@ function applyLang(){
   setText("#v-train .col:first-child .col-foot .btn","teach_btn");
   setText("#v-train .col:last-child .col-foot .btn","send");
   setText("#trash-btn","trash");
+  setText("#tg-btn","tg_btn");
   setText("#btn-add-policy","add_policy");
   setText("#btn-add-client","add_client");
   setText("#btn-add-product","add_product");
@@ -1061,6 +1087,69 @@ function bubble(boxId,cls,text,j){
 }
 $("#try-in").addEventListener("keydown",e=>{if(e.key==="Enter")tryAsk()});
 $("#fact-in").addEventListener("keydown",e=>{if(e.key==="Enter")addFact()});
+
+/* ── Telegram ── */
+function openTg(){$("#tg-overlay").classList.remove("hide");loadTg();}
+function closeTg(){$("#tg-overlay").classList.add("hide");}
+async function loadTg(){
+  $("#tg-body").innerHTML=`<div class="thinking">载入中</div>`;
+  const t=await api("telegram");
+  $("#tg-body").innerHTML=t.connected?tgConnected(t):tgSetup();
+}
+function tgSetup(){
+  return `<div class="sub" style="margin-bottom:14px">
+      用你自己的 Telegram bot 随时问 Hivora：查条款、查客户保单、要话术、录客户 —— 不用开网页。
+      bot 是你自己的，客户看到的也是你的品牌。</div>
+    <div style="margin-bottom:10px"><span class="step-n">1</span>
+      在 Telegram 里找 <b>@BotFather</b>，发 <code>/newbot</code>，按提示起个名字</div>
+    <div style="margin-bottom:10px"><span class="step-n">2</span>
+      它会给你一串 token，长得像 <code>7123456789:AAH...</code>，粘贴到下面</div>
+    <div class="row" style="margin:14px 0 6px">
+      <input id="tg-token" placeholder="粘贴 bot token" style="flex:1" autocomplete="off">
+      <button class="btn" onclick="tgConnect()">连接</button>
+    </div>
+    <div class="merr" id="tg-err"></div>
+    <div class="sub" style="margin-top:10px">token 会加密保存，页面上永远只显示后 4 位。</div>`;
+}
+function tgConnected(t){
+  const chats=(t.chats||[]).map(c=>`<div class="doc-row">📱 <b>${esc(c.name||c.chat_id)}</b>
+      <span class="meta">${esc(c.created)}</span>
+      <button class="icobtn" onclick="tgUnlink(${Number(c.id)})" aria-label="unlink">🗑</button>
+    </div>`).join("");
+  return `<div class="doc-row" style="margin-bottom:14px">
+      ✅ 已连接 <b>@${esc(t.username)}</b>
+      <span class="meta">token ${esc(t.token_hint)} · ${esc(t.since)}</span>
+      <button class="btn ghost" style="padding:4px 10px;font-size:11px"
+        onclick="tgDisconnect()">断开</button></div>
+    <div style="margin-bottom:8px"><b style="font-size:13px">已绑定的设备</b></div>
+    ${chats||`<span class="sub">还没有设备绑定。点下面拿绑定码。</span>`}
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)">
+      <div style="margin-bottom:10px"><span class="step-n">1</span>
+        在 Telegram 打开 <b>@${esc(t.username)}</b>，点 Start</div>
+      <div style="margin-bottom:10px"><span class="step-n">2</span>
+        把下面这个码发给它（10 分钟内有效）</div>
+      <div id="tg-code-box"><button class="btn" onclick="tgCode()">生成绑定码</button></div>
+    </div>`;
+}
+async function tgConnect(){
+  const v=$("#tg-token").value.trim(); if(!v)return;
+  $("#tg-err").textContent="连接中…";
+  try{await post("telegram/connect",{token:v});loadTg();}
+  catch(e){$("#tg-err").textContent="连接失败，请确认 token 是否正确";}
+}
+async function tgCode(){
+  const r=await post("telegram/bindcode");
+  $("#tg-code-box").innerHTML=`<span class="tg-code">${esc(r.code)}</span>
+    <div class="sub" style="margin-top:8px">发给 @${esc(r.username)} 即可绑定</div>`;
+}
+async function tgUnlink(id){
+  if(!confirm("解除这台设备的绑定？"))return;
+  await post("telegram/unlink",{id}); loadTg();
+}
+async function tgDisconnect(){
+  if(!confirm("断开 Telegram？所有已绑定的设备都会失效，bot 也会停止响应。"))return;
+  await post("telegram/disconnect"); loadTg();
+}
 
 /* ── 客户 ── */
 async function loadClients(){

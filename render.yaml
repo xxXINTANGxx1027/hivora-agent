@@ -32,6 +32,9 @@ services:
       # 登录有效期（天）
       - key: TOKEN_TTL_DAYS
         value: "14"
+      # Telegram webhook 的回调地址 —— 不填代理人就连不上自己的 bot
+      - key: PUBLIC_BASE_URL
+        value: https://hivora-agent-stage.onrender.com
       # 错误监控：填了 DSN 才启用，不填完全不引入
       - key: SENTRY_DSN
         sync: false

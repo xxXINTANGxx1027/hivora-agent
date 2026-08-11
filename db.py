@@ -124,6 +124,36 @@ class UsageDaily(Base):
     __table_args__ = (UniqueConstraint("agent_id", "day", "model", name="uq_usage_day"),)
 
 
+class TelegramBot(Base):
+    """代理人自己在 BotFather 建的 bot。token 加密存，且永不回传给前端。"""
+    __tablename__ = "telegram_bots"
+    agent_id = Column(String(64), primary_key=True)
+    username = Column(String(64), default="")        # @xxx_bot
+    token_enc = Column(Text)                          # Fernet 密文
+    path_secret = Column(String(64), unique=True, index=True)   # webhook 路径片段
+    header_secret = Column(String(64))                # Telegram 回传的校验头
+    connected = Column(String(24), default="")
+
+
+class TelegramChat(Base):
+    """已授权的 Telegram 会话。没绑过的人对 bot 说话一律不回。"""
+    __tablename__ = "telegram_chats"
+    id = Column(Integer, primary_key=True)
+    agent_id = Column(String(64), index=True)
+    chat_id = Column(String(32), index=True)
+    name = Column(String(200), default="")
+    created = Column(String(24), default="")
+    __table_args__ = (UniqueConstraint("agent_id", "chat_id", name="uq_tg_chat"),)
+
+
+class TelegramBind(Base):
+    """一次性绑定码，10 分钟有效。"""
+    __tablename__ = "telegram_binds"
+    code = Column(String(16), primary_key=True)
+    agent_id = Column(String(64), index=True)
+    expires = Column(Float, default=0.0)
+
+
 class LoginLock(Base):
     """登录失败计数。落库而不是放进程内存 —— 否则扩到第二个实例就形同虚设。"""
     __tablename__ = "login_locks"

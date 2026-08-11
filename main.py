@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 import auth
 import db
+import telegram
 from contextvars import ContextVar
 from db import Appointment, Client, Fact, Message, Policy, Product, SessionLocal, Thread
 from graph import MODEL, LLMUnavailable, QuotaExceeded, ask, ask_stream, llm_text
@@ -834,6 +835,97 @@ async def upload_document(file: UploadFile = File(...), insurer: str = Form(""),
         return dict(ok=True, chunks=n, pages=len(pages))
     finally:
         s.close()
+
+
+# ── Telegram（代理人自己的 bot）──────────────────────────────
+class TgConnectReq(BaseModel):
+    token: str
+
+
+@app.get("/api/telegram")
+def tg_status(aid: str = AID):
+    s = SessionLocal()
+    try:
+        return telegram.status(s, aid)
+    finally:
+        s.close()
+
+
+@app.post("/api/telegram/connect")
+def tg_connect(req: TgConnectReq, aid: str = AID):
+    s = SessionLocal()
+    try:
+        out = telegram.connect(s, aid, req.token)
+        db.audit(s, aid, "tg_connect", out.get("username", ""))
+        s.commit()
+        return dict(ok=True, **out)
+    except telegram.TelegramError as e:
+        s.rollback()
+        raise HTTPException(400, str(e))
+    finally:
+        s.close()
+
+
+@app.post("/api/telegram/disconnect")
+def tg_disconnect(aid: str = AID):
+    s = SessionLocal()
+    try:
+        telegram.disconnect(s, aid)
+        db.audit(s, aid, "tg_disconnect", "")
+        s.commit()
+        return {"ok": True}
+    finally:
+        s.close()
+
+
+@app.post("/api/telegram/bindcode")
+def tg_bind_code(aid: str = AID):
+    s = SessionLocal()
+    try:
+        row = s.query(db.TelegramBot).filter_by(agent_id=aid).first()
+        if not row:
+            raise HTTPException(400, "请先连接你的 bot")
+        return dict(code=telegram.new_bind_code(s, aid),
+                    username=row.username, ttl_seconds=telegram.BIND_TTL)
+    finally:
+        s.close()
+
+
+class TgUnlinkReq(BaseModel):
+    id: int
+
+
+@app.post("/api/telegram/unlink")
+def tg_unlink(req: TgUnlinkReq, aid: str = AID):
+    s = SessionLocal()
+    try:
+        telegram.unlink_chat(s, aid, req.id)
+        db.audit(s, aid, "tg_unlink", f"row={req.id}")
+        s.commit()
+        return {"ok": True}
+    finally:
+        s.close()
+
+
+@app.post("/api/tg/{path_secret}")
+async def tg_webhook(path_secret: str, request: Request):
+    """Telegram 回调。无登录态——靠路径随机片段 + secret header 认身份。
+
+    永远返回 200：给 Telegram 返错它会不停重投。
+    """
+    header = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+    try:
+        update = await request.json()
+    except Exception:
+        return {"ok": True}
+    s = SessionLocal()
+    try:
+        telegram.handle_update(s, path_secret, header, update)
+    except Exception:
+        log.exception("Telegram webhook 处理失败")
+    finally:
+        s.close()
+    return {"ok": True}
 
 
 # ── 管理后台（仅 admin）──────────────────────────────────────

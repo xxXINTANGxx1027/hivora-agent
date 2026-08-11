@@ -70,7 +70,7 @@ def test_trash_overlay_opens_and_closes(live_server, page, agent_factory):
     page.wait_for_selector("#trash-overlay:not(.hide)", timeout=10000)
     assert page.locator("#trash-body").is_visible()
 
-    page.click("text=关闭")
+    page.click("#trash-overlay >> text=关闭")
     page.wait_for_selector("#trash-overlay", state="hidden", timeout=10000)
     _assert_nothing_covers_the_page(page)
     # 关掉之后底下的按钮必须还能点
@@ -129,6 +129,26 @@ def test_language_toggle_relabels_everything(live_server, page, agent_factory):
     page.wait_for_function(
         """() => document.querySelector('#btn-add-client')
                  .textContent.includes('新增客户')""", timeout=10000)
+    _assert_no_js_errors(page)
+
+
+def test_telegram_panel_opens_and_shows_setup(live_server, page, agent_factory):
+    """没连过 bot 时，应该看到 BotFather 的引导步骤而不是空白。"""
+    _, email = agent_factory()
+    _login(page, live_server, email, "Agent-Pass-2026")
+    page.click('nav button[data-v="train"]')
+    page.wait_for_selector("#v-train:not(.hide)", timeout=10000)
+
+    page.click("#tg-btn")
+    page.wait_for_selector("#tg-overlay:not(.hide)", timeout=10000)
+    page.wait_for_selector("#tg-body >> text=BotFather", timeout=10000)
+    assert page.locator("#tg-token").is_visible()
+
+    page.click("#tg-overlay >> text=关闭")
+    page.wait_for_selector("#tg-overlay", state="hidden", timeout=10000)
+    _assert_nothing_covers_the_page(page)
+    page.click('nav button[data-v="dash"]')      # 关掉后底下还能点
+    page.wait_for_selector("#v-dash:not(.hide)", timeout=10000)
     _assert_no_js_errors(page)
 
 
