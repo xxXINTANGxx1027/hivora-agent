@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- 后端地址：留空 = 同源（server/static 自带的那份）。
+     发到 Vercel 的拷贝由 sync-frontend.sh 注入实际域名，不要手改这里。 -->
+<meta name="hivora-api" content="">
 <title>Hivora Insurance Agent · Stage</title>
 <style>
   :root {
@@ -412,6 +415,7 @@
       <div><h1>客户数据库</h1>
         <div class="sub">你自己的 client book（按代理人隔离）· 也可以直接对 Hivora 说「帮我加客户 Ahmad，电话 012-3456789」</div></div>
       <div class="actions">
+        <button class="btn ghost" id="trash-btn" onclick="openTrash()">🗑 回收站</button>
         <button class="btn ghost" onclick="openModal('policy')">＋ 加保单</button>
         <button class="btn" onclick="openModal('client')">＋ 新增客户</button>
       </div>
@@ -511,7 +515,7 @@
     <div class="mfield"><label>Login ID</label><input id="lg-email" placeholder="账号 / Login ID"></div>
     <div class="mfield" id="lg-name-w" style="display:none"><label>姓名 / Name</label><input id="lg-name"></div>
     <div class="mfield" id="lg-code-w" style="display:none"><label>邀请码 / Invite Code</label><input id="lg-code" placeholder="HIV-XXXXXX（向管理员购买获取）"></div>
-    <div class="mfield"><label>密码 / Password</label><input id="lg-pw" type="password" placeholder="至少 6 位"></div>
+    <div class="mfield"><label>密码 / Password</label><input id="lg-pw" type="password" placeholder="至少 8 位"></div>
     <div class="merr" id="lg-err"></div>
     <button class="btn" style="width:100%;margin-top:6px" id="lg-btn" onclick="doAuth()">登录 / Login</button>
     <div class="sub" style="margin-top:12px">账号由管理员发放，购买请联系管理员</div>
@@ -524,6 +528,22 @@
 </button>
 
 <!-- 新增弹窗 -->
+<div id="trash-overlay" class="hide" onclick="if(event.target===this)closeTrash()"
+  style="position:fixed;inset:0;background:#111a;z-index:60;display:flex;
+         align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--panel);border-radius:14px;max-width:560px;width:100%;
+              max-height:78vh;display:flex;flex-direction:column;overflow:hidden">
+    <div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;
+                align-items:center;gap:8px">
+      <b id="trash-title">🗑 回收站</b>
+      <span class="sub" id="trash-hint" style="margin:0"></span>
+      <button class="btn ghost" style="margin-left:auto;padding:5px 12px;font-size:12px"
+        onclick="closeTrash()">关闭</button>
+    </div>
+    <div id="trash-body" style="overflow-y:auto;padding:12px 18px"></div>
+  </div>
+</div>
+
 <div id="modal" class="hide" onclick="if(event.target===this)closeModal()">
   <div id="modal-panel">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
@@ -542,11 +562,19 @@
 
 <script>
 const $=q=>document.querySelector(q);
-const API_BASE=(location.hostname==="localhost"||location.hostname.endsWith("onrender.com"))
-  ?"":"https://hivora-agent-stage.onrender.com";
+/* 所有来自服务端的数据（客户名/消息正文/文件名/LLM 输出）进 innerHTML 前必须过 esc()。
+   客户在 WhatsApp 里发一句 <img onerror=...> 就能偷走 localStorage 里的 token。 */
+const ESCMAP={"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"};
+const esc=v=>String(v??"").replace(/[&<>"']/g,c=>ESCMAP[c]);
+const API_BASE=(document.querySelector('meta[name="hivora-api"]')?.content||"")
+  .trim().replace(/\/+$/,"");
 const TOKEN=()=>localStorage.getItem("hivora_token")||"";
 const api=(p,opt={})=>{opt.headers={...(opt.headers||{}),Authorization:"Bearer "+TOKEN()};
-  return fetch(API_BASE+"/api/"+p,opt).then(r=>{if(r.status===401){showLogin();throw new Error("401");}return r.json();});};
+  return fetch(API_BASE+"/api/"+p,opt).then(async r=>{
+    if(r.status===401||r.status===403){   /* 401=token 过期  403=账号被停用/到期 */
+      let d="";try{d=(await r.clone().json()).detail||"";}catch(e){}
+      logout(d);throw new Error("auth");}
+    return r.json();});};
 
 /* ── i18n（中/英）── */
 const I18N={
@@ -651,7 +679,9 @@ async function doAuth(){
   applyRole();
   applyLang();
 }
-function logout(){localStorage.removeItem("hivora_token");showLogin();}
+function logout(msg){localStorage.removeItem("hivora_token");
+  localStorage.removeItem("hivora_role");showLogin();
+  if(msg)$("#lg-err").textContent=msg;}
 const t=(k,n)=>{let s=(I18N[LANG][k]??I18N.zh[k]??k);return n!==undefined?s.replace("{n}",n):s;};
 function toggleLang(){LANG=LANG==="zh"?"en":"zh";localStorage.setItem("hivora_lang",LANG);applyLang();}
 function applyLang(){
@@ -696,6 +726,29 @@ function applyLang(){
 }
 const post=(p,body)=>api(p,{method:"POST",headers:{"Content-Type":"application/json"},
                             body:JSON.stringify(body||{})});
+/* 软删：进回收站，可恢复。彻底删除（PDPA）走管理员接口。 */
+const KIND_LBL={client:"客户",policy:"保单",appointment:"预约",fact:"知识",document:"文档"};
+async function del(kind,id,label,after){
+  if(!confirm(`删除${KIND_LBL[kind]||""}「${label}」？\n可以在回收站里恢复。`))return;
+  await post("delete",{kind,id});
+  (after||(()=>{}))(); loadDash();
+}
+async function openTrash(){
+  $("#trash-overlay").classList.remove("hide");
+  const rows=await api("trash");
+  $("#trash-hint").textContent=rows.length?`${rows.length} 项`:"";
+  $("#trash-body").innerHTML=rows.length?rows.map(r=>
+    `<div class="doc-row"><span class="pill blue">${esc(KIND_LBL[r.kind]||r.kind)}</span>
+     <b>${esc(r.label)}</b><span class="meta">${esc(r.deleted)}</span>
+     <button class="btn ghost" style="padding:4px 10px;font-size:11px"
+       onclick="restoreItem('${esc(r.kind)}',${Number(r.id)})">恢复</button></div>`).join("")
+    :`<span class="sub">回收站是空的</span>`;
+}
+function closeTrash(){$("#trash-overlay").classList.add("hide");}
+async function restoreItem(kind,id){
+  await post("restore",{kind,id}); openTrash();
+  loadClients();loadFacts();loadAppts();loadDash();
+}
 let curThread=null;
 function goView(v){document.querySelector(`[data-v="${v}"]`).click();}
 function toggleMore(){$("#more-sheet").classList.toggle("hide");}
@@ -718,9 +771,10 @@ document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{
 /* ── 数据化小组件 ── */
 const AV_COLORS=["#1e6bf0","#7c3aed","#0e9f6e","#e8930c","#e0552f","#0e7490"];
 function av(name){
+  name=String(name||"");
   let h=0;for(const c of name)h=(h*31+c.charCodeAt(0))>>>0;
-  const ini=name.trim().split(/[\s(]+/).map(w=>w[0]).slice(0,2).join("").toUpperCase();
-  return `<span class="av" style="background:${AV_COLORS[h%AV_COLORS.length]}">${ini}</span>`;
+  const ini=name.trim().split(/[\s(]+/).map(w=>w[0]||"").slice(0,2).join("").toUpperCase();
+  return `<span class="av" style="background:${AV_COLORS[h%AV_COLORS.length]}">${esc(ini)}</span>`;
 }
 function sparkBars(vals){
   const w=88,h=38,n=vals.length,gap=4,bw=(w-gap*(n-1))/n,max=Math.max(...vals,1);
@@ -772,7 +826,7 @@ function donut(segs,total,count){
     <text x="60" y="72" text-anchor="middle" class="pf-sub">${t("pf_month")}</text></svg>
     <div class="pf-legend">
     ${segs.map(s=>`<div class="pf-row"><span class="dot" style="background:${s.color}"></span>
-      <span class="pf-name">${s.label}</span><b>RM ${s.v.toLocaleString()}</b>
+      <span class="pf-name">${esc(s.label)}</span><b>RM ${s.v.toLocaleString()}</b>
       <span class="pf-pct">${Math.round(s.v/(total||1)*100)}%</span></div>`).join("")}
     <div class="pf-row" style="border-top:1px solid var(--line);padding-top:9px;margin-top:3px">
       <span class="pf-name">${t("pf_active")}</span><b>${count}</b><span class="pf-pct"></span></div>
@@ -851,10 +905,10 @@ async function loadDash(){
   $("#dash-table").innerHTML=`<tr><th>${t("th_time")}</th><th>${t("th_client")}</th>
     <th>${t("th_type")}</th><th>${t("th_detail")}</th><th>${t("th_status")}</th></tr>`
     +rows.slice(0,9).map(r=>`<tr>
-      <td style="white-space:nowrap;font-variant-numeric:tabular-nums">${r.tm}</td>
-      <td><span class="who">${av(r.who)}<b>${r.who}</b></span></td>
-      <td><span class="tychip">${r.ty}</span></td>
-      <td style="color:var(--dim)">${r.detail}</td><td>${r.chip}</td></tr>`).join("");
+      <td style="white-space:nowrap;font-variant-numeric:tabular-nums">${esc(r.tm)}</td>
+      <td><span class="who">${av(r.who)}<b>${esc(r.who)}</b></span></td>
+      <td><span class="tychip">${esc(r.ty)}</span></td>
+      <td style="color:var(--dim)">${esc(r.detail)}</td><td>${r.chip}</td></tr>`).join("");
 }
 
 /* ── 收件箱 ── */
@@ -862,11 +916,11 @@ async function loadInbox(){
   const ts=await api("inbox");
   $("#inbox-list").innerHTML=ts.map(th=>`
     <div class="titem ${curThread===th.id?"on":""}" onclick="openThread(${th.id})">
-      <b>${th.client}</b> ${th.unread?`<span class="badge">${th.unread}</span>`:""}
-      <div class="p">${th.last}</div>
+      <b>${esc(th.client)}</b> ${th.unread?`<span class="badge">${esc(th.unread)}</span>`:""}
+      <div class="p">${esc(th.last)}</div>
       <span class="pill ${th.status==="sent"?"ok":th.status==="drafted"?"blue":"warn"}">
         ${{pending:t("st_pending"),drafted:t("st_drafted"),sent:t("st_sent")}[th.status]}</span>
-      <span style="font-size:10px;color:var(--dim);float:right">${th.ts}</span>
+      <span style="font-size:10px;color:var(--dim);float:right">${esc(th.ts)}</span>
     </div>`).join("");
 }
 async function openThread(id){
@@ -884,11 +938,11 @@ async function openThread(id){
         <button class="btn ghost" onclick="setMode(${id},'human')">${t("to_human")}</button>
        </div>${suggHTML}`;
   $("#thread").innerHTML=`
-    <div class="thr-head">💬 ${th.client}
-      <span class="pill blue" style="margin-left:auto">${th.lang}</span>
+    <div class="thr-head">💬 ${esc(th.client)}
+      <span class="pill blue" style="margin-left:auto">${esc(th.lang)}</span>
       ${human?`<span class="pill due">${t("human")}</span>`:''}</div>
     <div class="thr-msgs">${th.messages.map(m=>
-      `<div class="m ${m.role}">${m.text}<div style="font-size:10px;opacity:.6;margin-top:3px">${m.ts}</div></div>`).join("")}</div>
+      `<div class="m ${m.role==="agent"?"agent":"customer"}">${esc(m.text)}<div style="font-size:10px;opacity:.6;margin-top:3px">${esc(m.ts)}</div></div>`).join("")}</div>
     <div class="thr-foot" id="thr-foot">
       ${th.status==="sent"?`<div class="sub" style="margin:0 0 8px">${t("sent_note")}</div>`:toolbar}
       <div class="row">
@@ -904,7 +958,7 @@ function suggCards(sugg){
     sugg.map((s,i)=>`<div class="draftbox" style="margin:0;cursor:pointer"
       onclick="document.getElementById('reply-text').value=this.querySelector('.sg').textContent">
       <div class="t">${styles[i]||(i+1)} · ${t("sugg_pick")}</div>
-      <div class="sg" style="font-size:12.5px;line-height:1.55;white-space:pre-wrap">${s}</div></div>`).join("")+`</div>`;
+      <div class="sg" style="font-size:12.5px;line-height:1.55;white-space:pre-wrap">${esc(s)}</div></div>`).join("")+`</div>`;
 }
 async function genSuggest(id){
   $("#thr-foot").innerHTML=`<span class="thinking">${t("suggesting")}</span>`;
@@ -924,11 +978,19 @@ async function sendReply(id){
 /* ── 训练 ── */
 async function loadFacts(){
   const f=await api("facts");
-  $("#facts").innerHTML=f.facts.map(x=>`<div class="fact">💡 ${x}</div>`).join("");
+  /* 后端从 ["文本"] 改成 [{id,text}]，兼容一下老格式 */
+  $("#facts").innerHTML=f.facts.map(x=>{
+    const o=(typeof x==="string")?{id:null,text:x}:x;
+    return `<div class="fact">💡 ${esc(o.text)}`+
+      (o.id?`<button class="icobtn" style="float:right"
+        onclick="del('fact',${Number(o.id)},'${esc(String(o.text).slice(0,20))}',loadFacts)"
+        aria-label="delete">🗑</button>`:"")+`</div>`;}).join("");
   const ds=await api("documents");
-  $("#docs").innerHTML=ds.map(d=>`<div class="doc-row">📄 <b>${d.filename}</b>
-    <span>${d.insurer||""} ${d.product||""}</span>
-    <span class="meta">${d.pages}页 · ${d.chunks}块</span></div>`).join("");
+  $("#docs").innerHTML=ds.map(d=>`<div class="doc-row">📄 <b>${esc(d.filename)}</b>
+    <span>${esc(d.insurer||"")} ${esc(d.product||"")}</span>
+    <span class="meta">${esc(d.pages)}页 · ${esc(d.chunks)}块</span>
+    <button class="icobtn" onclick="del('document',${Number(d.id)},'${esc(d.filename)}',loadFacts)"
+      aria-label="delete">🗑</button></div>`).join("");
 }
 async function uploadDoc(){
   const f=$("#doc-file").files[0]; if(!f){$("#doc-msg").textContent="请先选择 PDF/TXT 文件";return;}
@@ -950,8 +1012,51 @@ async function tryAsk(){
   const v=$("#try-in").value.trim(); if(!v)return; $("#try-in").value="";
   bubble("try-box","user",v);
   const th=bubble("try-box","thinking",t("thinking"));
-  const j=await post("chat",{message:v}); th.remove();
-  bubble("try-box","bot",j.answer,j);
+  const box=document.getElementById("try-box");
+  let d=null,meta={route:"",citations:[],needs_human:false};
+  const write=text=>{
+    if(!d){th.remove();d=document.createElement("div");d.className="m customer";
+      box.appendChild(d);}
+    d.textContent+=text; box.scrollTop=box.scrollHeight;
+  };
+  try{
+    const r=await fetch(API_BASE+"/api/chat/stream",{method:"POST",
+      headers:{"Content-Type":"application/json",Authorization:"Bearer "+TOKEN()},
+      body:JSON.stringify({message:v})});
+    if(r.status===401||r.status===403){th.remove();logout();return;}
+    if(!r.ok||!r.body)throw new Error("stream unavailable");
+    const rd=r.body.getReader(),dec=new TextDecoder(); let buf="";
+    for(;;){
+      const{done,value}=await rd.read(); if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      const lines=buf.split("\n\n"); buf=lines.pop();
+      for(const chunk of lines){
+        const line=chunk.split("\n").find(x=>x.startsWith("data:")); if(!line)continue;
+        let ev; try{ev=JSON.parse(line.slice(5).trim());}catch(e){continue;}
+        if(ev.type==="token")write(ev.text);
+        else if(ev.type==="route")meta.route=ev.route;
+        else if(ev.type==="done"){meta.citations=ev.citations||[];meta.needs_human=!!ev.needs_human;}
+        else if(ev.type==="error"){write(ev.message||"AI 服务暂时不可用");}
+      }
+    }
+  }catch(e){
+    /* 流式不可用（老后端/代理不支持）→ 退回一次性返回 */
+    try{const j=await post("chat",{message:v}); write(j.answer||"");
+        meta={route:j.route,citations:j.citations||[],needs_human:!!j.needs_human};}
+    catch(e2){write("AI 服务暂时不可用，请稍后再试");}
+  }
+  if(th.isConnected)th.remove();
+  if(meta.route)chips(box,meta);
+}
+function chips(box,j){
+  const meta=document.createElement("div"); meta.className="meta-chips";
+  const names={policy:t("route_policy"),clientbook:t("route_clientbook"),
+               drafting:t("route_drafting"),chat:t("route_chat"),
+               action:t("route_action"),fallback:t("route_fallback")};
+  meta.innerHTML=`<span class="chip" style="color:var(--hivora)">▸ ${esc(names[j.route]||j.route)}</span>`
+    +(j.citations||[]).map(c=>`<span class="chip">📄 ${esc(c.product)}·P${esc(c.page)}</span>`).join("")
+    +(j.needs_human?`<span class="chip" style="color:var(--red)">${t("to_human_chip")}</span>`:"");
+  box.appendChild(meta); box.scrollTop=box.scrollHeight;
 }
 
 function bubble(boxId,cls,text,j){
@@ -965,8 +1070,8 @@ function bubble(boxId,cls,text,j){
     const names={policy:t("route_policy"),clientbook:t("route_clientbook"),
                  drafting:t("route_drafting"),chat:t("route_chat"),
                  action:t("route_action"),fallback:t("route_fallback")};
-    meta.innerHTML=`<span class="chip" style="color:var(--hivora)">▸ ${names[j.route]||j.route}</span>`
-      +(j.citations||[]).map(c=>`<span class="chip">📄 ${c.product}·P${c.page}</span>`).join("")
+    meta.innerHTML=`<span class="chip" style="color:var(--hivora)">▸ ${esc(names[j.route]||j.route)}</span>`
+      +(j.citations||[]).map(c=>`<span class="chip">📄 ${esc(c.product)}·P${esc(c.page)}</span>`).join("")
       +(j.needs_human?`<span class="chip" style="color:var(--red)">${t("to_human_chip")}</span>`:"");
     box.appendChild(meta);
   }
@@ -981,36 +1086,44 @@ async function loadClients(){
   lastClients=cs;
   $("#client-cards").innerHTML=cs.map((c,i)=>`
     <div class="panel">
-      <h3>👤 ${c.name} <span style="font-weight:400;font-size:12px;color:var(--dim)">${c.phone}</span>
+      <h3>👤 ${esc(c.name)} <span style="font-weight:400;font-size:12px;color:var(--dim)">${esc(c.phone)}</span>
         <span style="float:right;display:flex;gap:6px">
           <button class="btn ghost" style="padding:5px 10px;font-size:11px"
             onclick="editClient(${i})">✎ ${t("edit")}</button>
           <button class="btn ghost" style="padding:5px 10px;font-size:11px"
-            onclick="analyzeOpp('${c.name.replace(/'/g,"\\'")}',${i})">${t("opp_btn")}</button>
+            onclick="analyzeOpp(${i})">${t("opp_btn")}</button>
+          <button class="icobtn" onclick="delClient(${i})" aria-label="delete">🗑</button>
         </span></h3>
       ${c.policies.length?`<table><tr><th>${t("th_product")}</th><th>${t("th_no")}</th><th>${t("th_premium")}</th><th>${t("th_renewal")}</th><th>${t("th_status")}</th><th></th></tr>
-        ${c.policies.map((p,j)=>`<tr><td>${p.product}</td><td>${p.policy_no}</td>
-          <td>${p.premium}</td><td>${p.renewal}</td>
+        ${c.policies.map((p,j)=>`<tr><td>${esc(p.product)}</td><td>${esc(p.policy_no)}</td>
+          <td>${esc(p.premium)}</td><td>${esc(p.renewal)}</td>
           <td><span class="pill ${p.days<0?"due":p.days<=30?"warn":"ok"}">
           ${p.days<0?t("expired"):p.days<=30?t("d_later",p.days):t("valid")}</span></td>
-          <td><button class="icobtn" onclick="editPolicy(${i},${j})" aria-label="edit">✎</button></td></tr>`).join("")}
+          <td><button class="icobtn" onclick="editPolicy(${i},${j})" aria-label="edit">✎</button>
+          <button class="icobtn" onclick="delPolicy(${i},${j})" aria-label="delete">🗑</button></td></tr>`).join("")}
         </table>`:`<span class="sub">${t("no_policy")}</span>`}
-      <div class="sub" style="margin:8px 0 0">📝 ${c.notes}</div>
+      <div class="sub" style="margin:8px 0 0">📝 ${esc(c.notes)}</div>
       <div id="opp-${i}"></div>
     </div>`).join("");
 }
 let lastClients=[];
 function editClient(i){const c=lastClients[i];
-  openModal("editClient",{orig:c.name,name:c.name,phone:c.phone,notes:c.notes});}
+  /* 用 id 定位，不再用姓名——同名或改名会挂错人 */
+  openModal("editClient",{id:c.id,name:c.name,phone:c.phone,notes:c.notes});}
 function editPolicy(i,j){const c=lastClients[i],p=c.policies[j];
-  openModal("editPolicy",{client:c.name,orig_no:p.policy_no,product:p.product,
+  openModal("editPolicy",{id:p.id,product:p.product,
     policy_no:p.policy_no,premium:p.premium,renewal:p.renewal});}
-async function analyzeOpp(name,i){
+function delClient(i){const c=lastClients[i];
+  del("client",c.id,c.name,()=>{loadClients();});}
+function delPolicy(i,j){const p=lastClients[i].policies[j];
+  del("policy",p.id,p.product+" "+p.policy_no,()=>{loadClients();});}
+async function analyzeOpp(i){
+  const name=(lastClients[i]||{}).name; if(!name)return;
   const box=document.getElementById("opp-"+i);
   box.innerHTML=`<div class="thinking" style="margin-top:8px">${t("analyzing")}</div>`;
-  const r=await post("opportunity",{client:name});
+  const r=await post("opportunity",{client_id:(lastClients[i]||{}).id,client:name});
   box.innerHTML=`<div class="draftbox" style="margin-top:10px"><div class="t">${t("opp_cap")}</div>
-    <div style="font-size:12.5px;white-space:pre-wrap;line-height:1.6">${r.analysis}</div></div>`;
+    <div style="font-size:12.5px;white-space:pre-wrap;line-height:1.6">${esc(r.analysis)}</div></div>`;
 }
 
 /* ── 产品目录 ── */
@@ -1019,10 +1132,10 @@ async function loadProducts(){
   $("#prod-cards").innerHTML=ps.map(p=>`
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <b style="font-size:15px">${p.name}</b><span class="pill blue">${p.type}</span></div>
-      <div class="s" style="margin:2px 0 8px">${p.insurer}</div>
-      <div style="font-size:14px;font-weight:700;color:var(--hivora);margin-bottom:8px">${p.price}</div>
-      ${p.highlights.map(h=>`<div style="font-size:12px;padding:3px 0;color:var(--text)">· ${h}</div>`).join("")}
+        <b style="font-size:15px">${esc(p.name)}</b><span class="pill blue">${esc(p.type)}</span></div>
+      <div class="s" style="margin:2px 0 8px">${esc(p.insurer)}</div>
+      <div style="font-size:14px;font-weight:700;color:var(--hivora);margin-bottom:8px">${esc(p.price)}</div>
+      ${(p.highlights||[]).map(h=>`<div style="font-size:12px;padding:3px 0;color:var(--text)">· ${esc(h)}</div>`).join("")}
     </div>`).join("");
 }
 
@@ -1046,35 +1159,37 @@ async function loadAppts(){
   for(let b=0;b<off;b++)cells+=`<div class="cal-d out"></div>`;
   for(let day=1;day<=dim;day++){
     const evs=(byDay[day]||[]).map(a=>
-      `<div class="cal-ev" title="${a.time} ${a.client} · ${a.purpose||""}">${a.time} ${a.client.split(" ")[0]}</div>`).join("");
+      `<div class="cal-ev" title="${esc(a.time+" "+a.client+" · "+(a.purpose||""))}">${esc(a.time)} ${esc(String(a.client||"").split(" ")[0])}</div>`).join("");
     cells+=`<div class="cal-d${day===Dy?" today":""}"><span class="cal-n">${day}</span>${evs}</div>`;
   }
   $("#cal-grid").innerHTML=cells;
   $("#appt-table").innerHTML=`<tr><th>${t("th_date")}</th><th>${t("th_time")}</th><th>${t("th_client")}</th><th>${t("th_purpose")}</th><th>${t("th_channel")}</th><th></th></tr>`
-    +as.map(a=>`<tr><td><b>${a.date}</b></td><td>${a.time}</td><td>${a.client}</td>
-     <td>${a.purpose}</td><td>${a.channel}</td>
+    +as.map(a=>`<tr><td><b>${esc(a.date)}</b></td><td>${esc(a.time)}</td><td>${esc(a.client)}</td>
+     <td>${esc(a.purpose)}</td><td>${esc(a.channel)}</td>
      <td><span class="pill ${a.days<0?"due":a.days<=2?"warn":"ok"}">
-       ${a.days<0?t("past"):a.days===0?t("today"):t("d_later",a.days)}</span></td></tr>`).join("");
+       ${a.days<0?t("past"):a.days===0?t("today"):t("d_later",a.days)}</span>
+       <button class="icobtn" onclick="del('appointment',${Number(a.id)},'${esc(a.client)}',loadAppts)"
+         aria-label="delete">🗑</button></td></tr>`).join("");
 }
 /* ── 新增弹窗（右上角 ＋ 按钮触发）── */
 const MODALS={
   newAgent:{title:"m_newagent",fields:[
     {id:"email",label:"f_loginid",ph:"代理人的登录账号（如 ali123 或邮箱）"},
-    {id:"password",label:"f_pw",ph:"至少 6 位，发给代理人"},
+    {id:"password",label:"f_pw",ph:"至少 8 位，发给代理人"},
     {id:"name",label:"f_name",ph:""},
     {id:"plan",label:"f_plan",ph:"paid / trial"}],
     required:["email","password"],
     save:async v=>{const r=await post("admin/agents/create",v);
       if(!r.ok&&r.detail)throw r.detail; loadAdmin();}},
   editClient:{title:"m_editc",fields:[
-    {id:"orig",type:"hidden"},
+    {id:"id",type:"hidden"},
     {id:"name",label:"f_name"},
     {id:"phone",label:"f_phone"},
     {id:"notes",label:"f_notes"}],
     required:["name"],
     save:async v=>{await post("clients/update",v);loadClients();loadDash();}},
   editPolicy:{title:"m_editp",fields:[
-    {id:"client",type:"hidden"},{id:"orig_no",type:"hidden"},
+    {id:"id",type:"hidden"},
     {id:"product",label:"f_product"},
     {id:"policy_no",label:"f_pno"},
     {id:"premium",label:"f_premium"},
@@ -1145,9 +1260,9 @@ async function loadRenewals(){
   const rs=await api("renewals");
   $("#renew-table").innerHTML=`<tr><th>${t("th_client")}</th><th>${t("th_product")}</th><th>${t("th_no")}</th>
     <th>${t("th_premium")}</th><th>${t("th_renewal")}</th><th>${t("th_urgency")}</th></tr>`+rs.map(r=>
-    `<tr><td><b>${r.client}</b><br><span class="sub">${r.phone}</span></td>
-     <td>${r.product}</td><td>${r.policy_no}</td><td>${r.premium}</td>
-     <td>${r.renewal}</td>
+    `<tr><td><b>${esc(r.client)}</b><br><span class="sub">${esc(r.phone)}</span></td>
+     <td>${esc(r.product)}</td><td>${esc(r.policy_no)}</td><td>${esc(r.premium)}</td>
+     <td>${esc(r.renewal)}</td>
      <td><span class="pill ${r.days<0?"due":r.days<=30?"warn":"ok"}">
        ${r.days<0?t("expired_n",-r.days):r.days<=30?t("d_later",r.days)+" ⚠️":t("d_later",r.days)}</span></td></tr>`).join("");
 }
@@ -1156,7 +1271,7 @@ async function loadRenewals(){
 let custPoll=null;
 async function openCustomer(){
   const ts=await api("inbox");
-  $("#cust-sel").innerHTML=ts.map(t=>`<option value="${t.id}">${t.client}</option>`).join("");
+  $("#cust-sel").innerHTML=ts.map(t=>`<option value="${esc(t.id)}">${esc(t.client)}</option>`).join("");
   $("#cust-overlay").classList.remove("hide");
   loadCustomer();
   custPoll=setInterval(loadCustomer,3000);   // 轮询：代理人发了新回复就出现
@@ -1173,8 +1288,8 @@ async function loadCustomer(){
     return `<div style="align-self:${me?"flex-end":"flex-start"};max-width:75%;
       background:${me?"#d9fdd3":"#fff"};padding:7px 11px;border-radius:10px;
       font-size:13px;line-height:1.5;white-space:pre-wrap;
-      box-shadow:0 1px 1px rgba(0,0,0,.08)">${m.text}
-      <div style="font-size:10px;color:#8696a0;text-align:right;margin-top:2px">${m.ts}</div></div>`;
+      box-shadow:0 1px 1px rgba(0,0,0,.08)">${esc(m.text)}
+      <div style="font-size:10px;color:#8696a0;text-align:right;margin-top:2px">${esc(m.ts)}</div></div>`;
   }).join("");
   const box=$("#cust-msgs"); box.scrollTop=box.scrollHeight;
 }
@@ -1193,13 +1308,14 @@ function applyRole(){
 async function loadAdmin(){
   const inv=await api("admin/invites");
   $("#adm-invites").innerHTML=inv.length?inv.map(i=>
-    `<div class="doc-row"><b style="font-family:monospace">${i.code}</b>
-     <span class="meta">${i.used_by?`已用 · ${i.used_by}`:"未使用 · "+i.created}</span>
-     ${i.used_by?"":`<button class="icobtn" onclick="navigator.clipboard.writeText('${i.code}')">复制</button>`}</div>`).join("")
+    `<div class="doc-row"><b style="font-family:monospace">${esc(i.code)}</b>
+     <span class="meta">${i.used_by?`已用 · ${esc(i.used_by)}`:"未使用 · "+esc(i.created)}</span>
+     ${i.used_by?"":`<button class="icobtn" data-code="${esc(i.code)}"
+       onclick="navigator.clipboard.writeText(this.dataset.code)">复制</button>`}</div>`).join("")
     :`<span class="sub">还没有邀请码，点右上角生成</span>`;
   const ags=await api("admin/agents");
   $("#adm-agents").innerHTML=`<tr><th>Email</th><th>姓名</th><th>角色</th><th>套餐</th><th>状态</th><th></th></tr>`
-    +ags.map(a=>`<tr><td>${a.email}</td><td>${a.name}</td><td>${a.role}</td><td>${a.plan}</td>
+    +ags.map(a=>`<tr><td>${esc(a.email)}</td><td>${esc(a.name)}</td><td>${esc(a.role)}</td><td>${esc(a.plan)}</td>
       <td><span class="pill ${a.active?"ok":"due"}">${a.active?"启用":"停用"}</span></td>
       <td>${a.role==="admin"?"":`<button class="btn ghost" style="padding:4px 10px;font-size:11px"
         onclick="toggleAgent(${a.id},${!a.active})">${a.active?"停用":"启用"}</button>`}</td></tr>`).join("");

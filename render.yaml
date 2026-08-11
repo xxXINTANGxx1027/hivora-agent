@@ -6,11 +6,29 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
+      # 打开生产守卫：缺 DATABASE_URL / SECRET_KEY / ALLOWED_ORIGINS 或弱管理员口令时拒绝启动
+      - key: HIVORA_ENV
+        value: production
+      # ⚠️ 必须 ≥32 字符。Render 自动生成后到 Dashboard 确认一下长度，不够就自己贴
+      # （openssl rand -hex 32）。换掉这个值会让所有人重新登录。
       - key: SECRET_KEY
         generateValue: true
+      # Neon Postgres 连接串。不贴 = 拒绝启动（原来会静默退回 SQLite，重启丢数据）
+      - key: DATABASE_URL
+        sync: false
+      # 允许的前端域名，逗号分隔。不能是 *
+      - key: ALLOWED_ORIGINS
+        value: https://hivora-frontend.vercel.app
+      # 首次部署用来创建管理员。密码 ≥10 位且不能是常见口令，否则拒绝启动。
+      # 管理员建好之后：留空 → 保持现有密码不变；填新值 → 下次启动改成新密码。
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
       - key: OPENROUTER_API_KEY
         sync: false
       - key: OPENROUTER_MODEL
         value: deepseek/deepseek-v3.2
-      - key: DATABASE_URL
-        sync: false
+      # 登录有效期（天）
+      - key: TOKEN_TTL_DAYS
+        value: "14"

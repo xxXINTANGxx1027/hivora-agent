@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: pytest tests -q
+
+  guards:
+    # 生产守卫：配置缺失必须拒绝启动，而不是回落到不安全的默认值
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: 缺 DATABASE_URL 必须拒启
+        env:
+          HIVORA_ENV: production
+        run: |
+          python -c "import main" 2>err.txt && { echo "❌ 竟然启动成功了"; exit 1; }
+          grep -q "DATABASE_URL" err.txt || { echo "❌ 拒启原因不对："; cat err.txt; exit 1; }
+          echo "✅ 缺 DATABASE_URL 已拒启"
+      - name: 缺 SECRET_KEY 必须拒启
+        env:
+          HIVORA_ENV: production
+          DATABASE_URL: postgresql://u:p@localhost:5432/db
+        run: |
+          python -c "import auth" 2>err.txt && { echo "❌ 竟然启动成功了"; exit 1; }
+          grep -q "SECRET_KEY" err.txt || { echo "❌ 拒启原因不对："; cat err.txt; exit 1; }
+          echo "✅ 缺 SECRET_KEY 已拒启"
+      - name: 弱 ADMIN_PASSWORD 必须拒启
+        env:
+          HIVORA_ENV: production
+          DATABASE_URL: postgresql://u:p@localhost:5432/db
+          SECRET_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef
+          ALLOWED_ORIGINS: https://example.com
+          ADMIN_EMAIL: a@b.c
+          ADMIN_PASSWORD: admin123
+        run: |
+          python -c "import auth; auth.ensure_admin()" 2>err.txt && { echo "❌ 竟然启动成功了"; exit 1; }
+          grep -q "ADMIN_PASSWORD" err.txt || { echo "❌ 拒启原因不对："; cat err.txt; exit 1; }
+          echo "✅ 弱管理员口令已拒启"

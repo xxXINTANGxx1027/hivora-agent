@@ -1,4 +1,9 @@
-"""条款知识库：M1 内置示例条款 + 关键词检索（下一步换 pgvector 向量检索）。"""
+"""条款知识库：代理人上传的真实条款 + 关键词检索（下一步换 pgvector 向量检索）。
+
+⚠️ 下面的 POLICY_CHUNKS 是**虚构的示例条款**（示例人寿 / Demo Life 等），
+只提供给演示账号（DEMO_AGENT）。真实付费用户永远看不到它们——否则 AI 会带着
+"📄 第X页" 的出处一本正经地引用编造的条款，代理人再转发给客户，就是合规事故。
+"""
 
 POLICY_CHUNKS = [
     dict(insurer="示例人寿 (Demo Life)", product="MediShield Plus", page=3,
@@ -35,45 +40,73 @@ POLICY_CHUNKS = [
 
 _KWS = ["等待期", "限额", "除外", "宽限", "自杀", "残废", "保额", "体检",
         "病房", "已存在", "先天", "意外", "续保", "失效"]
-_PRODS = ["medishield", "careplus", "familyguard"]
+_STOP = {"的", "了", "吗", "呢", "是", "在", "有", "和", "我", "你", "他", "她",
+         "什么", "多少", "怎么", "可以", "请问", "一下", "the", "a", "an", "is",
+         "are", "of", "to", "for", "and", "what", "how", "my", "i"}
+_CJK = "一-鿿"
+_SEP = str.maketrans({c: " " for c in "？?！!。，,、；;：:（）()【】[]「」\"'\n\r\t"})
+_MAX_CANDS = 800     # 单次检索最多打分的 chunk 数，防止大 PDF 把内存吃穿
 
 
-def _score(query: str, product: str, text: str) -> int:
-    q_terms = set(query.lower().replace("？", " ").replace("?", " ").split())
+def _terms(query: str) -> list[str]:
+    """中文按 2-gram 切，英文/数字按空格切。
+
+    原来直接 query.split() 对中文无效——中文不按空格断词，整句会变成一个 term，
+    命中率约等于 0，实际只有 _KWS 的加分在起作用。
+    """
+    import re
+    q = query.lower().translate(_SEP)
+    out = []
+    for w in q.split():
+        if not w or w in _STOP:
+            continue
+        if re.fullmatch(f"[{_CJK}]+", w):
+            out.extend(w[i:i + 2] for i in range(max(1, len(w) - 1)))   # 2-gram
+        else:
+            for piece in re.findall(f"[^{_CJK}]+|[{_CJK}]+", w):
+                if re.fullmatch(f"[{_CJK}]+", piece):
+                    out.extend(piece[i:i + 2] for i in range(max(1, len(piece) - 1)))
+                elif piece not in _STOP and len(piece) > 1:
+                    out.append(piece)
+    return [t for t in dict.fromkeys(out) if t not in _STOP]
+
+
+def _score(query: str, product: str, text: str, terms: list[str] | None = None) -> int:
+    terms = _terms(query) if terms is None else terms
     t = (product + " " + text).lower()
-    score = sum(1 for x in q_terms if x and x in t)
+    score = sum(1 for x in terms if x in t)
     score += sum(2 for kw in _KWS if kw in query and kw in text)
-    score += sum(3 for p in _PRODS if p in query.lower() and p in product.lower())
+    score += sum(3 for w in terms if len(w) > 2 and w in product.lower())   # 产品名命中加权
     return score
 
 
 def search_policy_chunks(query: str, agent_id: str = "", top_k: int = 4) -> list[dict]:
-    """内置示例条款 + 该代理人自己上传的文档，合并按相关度排序。"""
+    """该代理人自己上传的条款文档，按相关度排序。演示账号额外附带内置示例条款。"""
     import db
-    cands = list(POLICY_CHUNKS)
+    from sqlalchemy import or_
+
+    terms = _terms(query)
+    cands: list[dict] = []
+    if db.DEMO_DATA and agent_id == db.DEMO_AGENT:
+        cands.extend(POLICY_CHUNKS)
     if agent_id:
         s = db.SessionLocal()
         try:
-            for c in s.query(db.Chunk).filter_by(agent_id=agent_id).all():
+            q = (s.query(db.Chunk).join(db.Document)
+                 .filter(db.Chunk.agent_id == agent_id)
+                 .filter((db.Document.deleted == "") | (db.Document.deleted.is_(None))))
+            # 先在 SQL 侧用关键词粗筛，筛不到再退回全量（上限 _MAX_CANDS）。
+            likes = [db.Chunk.text.contains(w) for w in terms[:8]]
+            rows = q.filter(or_(*likes)).limit(_MAX_CANDS).all() if likes else []
+            if not rows:
+                rows = q.limit(_MAX_CANDS).all()
+            for c in rows:
                 cands.append(dict(insurer=c.insurer or "上传文档",
                                   product=c.product or (c.document.filename if c.document else ""),
                                   page=c.page, text=c.text))
         finally:
             s.close()
-    scored = [(sc, c) for c in cands if (sc := _score(query, c["product"], c["text"])) > 0]
-    scored.sort(key=lambda x: -x[0])
-    return [c for _, c in scored[:top_k]]
-
-
-def _old_search(query: str, top_k: int = 4) -> list[dict]:
-    q_terms = set(query.lower().replace("？", " ").replace("?", " ").split())
-    scored = []
-    for c in POLICY_CHUNKS:
-        text = (c["product"] + " " + c["text"]).lower()
-        score = sum(1 for t in q_terms if t and t in text)
-        score += sum(2 for kw in _KWS if kw in query and kw in c["text"])
-        score += sum(3 for p in _PRODS if p in query.lower() and p in c["product"].lower())
-        if score > 0:
-            scored.append((score, c))
+    scored = [(sc, c) for c in cands
+              if (sc := _score(query, c["product"], c["text"], terms)) > 0]
     scored.sort(key=lambda x: -x[0])
     return [c for _, c in scored[:top_k]]
