@@ -1,0 +1,1091 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hivora Insurance Agent · Stage</title>
+<style>
+  :root {
+    --hivora:#1e6bf0; --hivora-dark:#1554c4; --hivora-light:#e8f0fe;
+    --bg:#f4f7fc; --panel:#fff; --line:#e2e9f5; --text:#17233c; --dim:#64748f;
+    --green:#0e9f6e; --orange:#e8930c; --red:#e0552f; --purple:#7c3aed;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{font-family:-apple-system,"PingFang SC",sans-serif;background:var(--bg);
+       color:var(--text);display:flex;height:100dvh;overflow:hidden}
+  /* ── 侧栏 ── */
+  aside{width:220px;background:var(--panel);border-right:1px solid var(--line);
+        display:flex;flex-direction:column;padding:16px 10px;flex-shrink:0}
+  .brand{display:flex;align-items:center;gap:8px;padding:0 8px 16px}
+  .brand .logo{width:30px;height:30px;border-radius:8px;background:var(--hivora);
+               color:#fff;display:flex;align-items:center;justify-content:center;
+               font-weight:800}
+  .brand b{font-size:14px}.brand span{font-size:10px;color:var(--dim);display:block}
+  .sec{font-size:10px;color:var(--dim);letter-spacing:.08em;margin:12px 8px 4px;
+       text-transform:uppercase}
+  nav button{display:flex;align-items:center;gap:8px;width:100%;border:0;
+             background:none;padding:9px 10px;border-radius:9px;font-size:13px;
+             color:var(--text);cursor:pointer;text-align:left}
+  nav button:hover{background:var(--hivora-light)}
+  nav button.on{background:var(--hivora-light);color:var(--hivora-dark);font-weight:600}
+  .badge{margin-left:auto;background:var(--red);color:#fff;font-size:10px;
+         border-radius:99px;padding:1px 7px}
+  .foot{margin-top:auto;font-size:10px;color:var(--dim);padding:8px}
+  /* ── 主区 ── */
+  main{flex:1;overflow-y:auto;padding:54px 26px 22px}
+  #lang-btn{position:fixed;top:12px;right:22px;z-index:40;background:var(--panel);
+    border:1px solid var(--line);border-radius:99px;padding:6px 14px;font-size:12.5px;
+    font-weight:600;color:var(--hivora-dark);cursor:pointer;display:flex;
+    align-items:center;gap:6px;box-shadow:0 1px 4px rgba(23,35,60,.06)}
+  #lang-btn:hover{border-color:var(--hivora);background:var(--hivora-light)}
+  #lang-btn svg{width:15px;height:15px}
+  h1{font-size:19px;margin-bottom:2px}
+  .sub{font-size:12px;color:var(--dim);margin-bottom:18px}
+  .cards{display:grid;grid-template-columns:repeat(12,1fr);
+         gap:12px;margin-bottom:20px}
+  .cards .card{grid-column:span 3}
+  .cards .card:nth-child(n+5){grid-column:span 4}
+  @media(max-width:1100px){
+    .cards .card{grid-column:span 6!important}
+    .cards .card:last-child{grid-column:span 12!important}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+        padding:14px 16px}
+  .card .k{font-size:11px;color:var(--dim);text-transform:uppercase;
+           letter-spacing:.05em}
+  .card .v{font-size:27px;font-weight:750;letter-spacing:-.02em;
+           font-variant-numeric:tabular-nums;line-height:1}
+  .card .s{font-size:11px;color:var(--dim)}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+         padding:16px;margin-bottom:16px}
+  .panel h3{font-size:14px;margin-bottom:10px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{font-size:11px;color:var(--dim);text-align:left;padding:6px 8px;
+     border-bottom:1px solid var(--line)}
+  td{padding:8px;border-bottom:1px solid var(--line)}
+  .pill{border-radius:99px;padding:2px 9px;font-size:11px;font-weight:600}
+  .pill.ok{background:#e7f7f0;color:var(--green)}
+  .pill.warn{background:#fdf3e3;color:var(--orange)}
+  .pill.due{background:#fdeae4;color:var(--red)}
+  .pill.blue{background:var(--hivora-light);color:var(--hivora-dark)}
+  .btn{background:var(--hivora);color:#fff;border:0;border-radius:9px;
+       padding:8px 14px;font-size:12.5px;font-weight:600;cursor:pointer}
+  .btn:hover{background:var(--hivora-dark)} .btn:disabled{opacity:.5}
+  .btn.ghost{background:var(--panel);color:var(--hivora);
+             border:1px solid var(--hivora)}
+  input,textarea{background:#fbfdff;border:1.5px solid var(--line);border-radius:9px;
+        padding:9px 12px;font-size:13px;outline:none;font-family:inherit;
+        color:var(--text)}
+  input:focus,textarea:focus{border-color:var(--hivora)}
+  /* 收件箱 */
+  .split{display:grid;grid-template-columns:300px 1fr;gap:14px;
+         height:calc(100dvh - 150px)}
+  .list{overflow-y:auto;display:flex;flex-direction:column;gap:8px}
+  .titem{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+         padding:11px 13px;cursor:pointer}
+  .titem:hover,.titem.on{border-color:var(--hivora)}
+  .titem b{font-size:13px}.titem .p{font-size:12px;color:var(--dim);
+         margin:3px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .thread{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+          display:flex;flex-direction:column;overflow:hidden}
+  .thr-head{padding:12px 16px;border-bottom:1px solid var(--line);font-size:14px;
+            font-weight:600;display:flex;align-items:center;gap:8px}
+  .thr-msgs{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;
+            gap:8px;background:#f7f9fd}
+  .m{max-width:70%;padding:8px 12px;border-radius:14px;font-size:13px;
+     line-height:1.55;white-space:pre-wrap}
+  .m.customer{align-self:flex-start;background:var(--panel);
+              border:1px solid var(--line);border-bottom-left-radius:4px}
+  .m.agent{align-self:flex-end;background:var(--hivora);color:#fff;
+           border-bottom-right-radius:4px}
+  .thr-foot{padding:12px;border-top:1px solid var(--line)}
+  .draftbox{background:#fdf9ec;border:1.5px dashed var(--orange);border-radius:10px;
+            padding:10px;margin-bottom:8px}
+  .draftbox .t{font-size:10px;color:var(--orange);font-weight:700;margin-bottom:4px}
+  .draftbox textarea{width:100%;border:0;background:none;padding:0;font-size:13px;
+            resize:vertical;min-height:60px}
+  .row{display:flex;gap:8px}
+  /* 训练 */
+  .train{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .chatbox{height:300px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;
+           background:#f7f9fd;border-radius:10px;padding:12px;margin-bottom:10px}
+  .fact{display:flex;gap:6px;align-items:center;font-size:12.5px;background:#fbfdff;
+        border:1px solid var(--line);border-radius:9px;padding:7px 10px;
+        margin-bottom:6px}
+  .meta-chips{display:flex;gap:4px;flex-wrap:wrap;font-size:10px;margin-top:4px}
+  .chip{border-radius:99px;padding:1px 8px;border:1px solid var(--line);
+        color:var(--dim);background:var(--panel)}
+  .thinking{color:var(--dim);font-size:12px}
+  .thinking::after{content:"…";animation:d 1.2s infinite}
+  @keyframes d{0%{content:"·"}33%{content:"··"}66%{content:"···"}}
+  .hide{display:none}
+  #cust-overlay:not(.hide){display:flex}
+  /* 页头：标题 + 右上角动作按钮 */
+  .page-head{display:flex;justify-content:space-between;align-items:flex-start;
+             gap:12px;margin-bottom:18px}
+  .page-head h1{margin-bottom:2px}
+  .page-head .sub{margin-bottom:0}
+  .page-head .actions{display:flex;gap:8px;flex-shrink:0}
+  /* Modal */
+  #modal{position:fixed;inset:0;z-index:60;background:rgba(15,20,32,.52);
+         align-items:center;justify-content:center}
+  #modal:not(.hide){display:flex}
+  #modal-panel{background:var(--panel);border-radius:16px;padding:20px 22px;
+         width:440px;max-width:92vw;max-height:88dvh;overflow-y:auto;
+         box-shadow:0 20px 60px rgba(15,20,32,.25);
+         animation:pop .2s ease-out}
+  @keyframes pop{from{transform:scale(.96);opacity:0}}
+  .mfield{margin-bottom:12px}
+  .mfield label{display:block;font-size:12px;color:var(--dim);margin-bottom:5px;
+         font-weight:600}
+  .mfield input{width:100%}
+  .merr{color:var(--red);font-size:11px;margin-top:4px}
+  .grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+  /* GPTs 编辑器式左右双栏 */
+  .gpts{display:grid;grid-template-columns:1fr 1fr;height:calc(100dvh - 140px);
+        background:var(--panel);border:1px solid var(--line);border-radius:14px;
+        overflow:hidden}
+  .gpts .col{display:flex;flex-direction:column;min-width:0}
+  .gpts .col+.col{border-left:1px solid var(--line)}
+  .col-head{padding:11px;text-align:center;font-size:13px;font-weight:700;
+        border-bottom:1px solid var(--line);color:var(--hivora-dark)}
+  .col-scroll{flex:1;overflow-y:auto;padding:16px}
+  .col-foot{padding:12px;border-top:1px solid var(--line)}
+  @media(max-width:900px){.gpts{grid-template-columns:1fr;height:auto}
+    .gpts .col+.col{border-left:0;border-top:1px solid var(--line)}
+    .gpts .col-scroll{max-height:45dvh}}
+  .li{display:flex;justify-content:space-between;align-items:center;gap:8px;
+      padding:8px 10px;border-radius:9px;font-size:13px;cursor:pointer}
+  .li:hover{background:var(--hivora-light)}
+  .li .who{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  @media(max-width:768px){
+    body{flex-direction:column}
+    main{order:1;padding:50px 12px calc(76px + env(safe-area-inset-bottom,0px))}
+    aside{order:2;position:fixed;left:0;right:0;bottom:0;z-index:35;width:100%;
+      flex-direction:row;align-items:stretch;gap:0;
+      padding:4px 4px calc(4px + env(safe-area-inset-bottom,0px));
+      border-right:0;border-top:1px solid var(--line);overflow-x:auto;
+      box-shadow:0 -2px 12px rgba(23,35,60,.08)}
+    aside::-webkit-scrollbar{display:none}
+    .brand,.sec,.foot{display:none}
+    nav{display:contents}
+    nav button{position:relative;flex:1 0 auto;width:auto;min-width:52px;
+      flex-direction:column;justify-content:center;gap:3px;padding:7px 4px;
+      font-size:17px;border-radius:10px}
+    nav button .lbl{font-size:9.5px;line-height:1;color:var(--dim);font-weight:500}
+    nav button.on .lbl{color:var(--hivora-dark);font-weight:700}
+    .badge{position:absolute;top:2px;right:8px;margin:0}
+    aside>button.btn.ghost{flex:1 0 auto;min-width:56px;display:flex;flex-direction:column;
+      gap:3px;align-items:center;justify-content:center;border:0;background:none;
+      color:var(--text);font-size:17px;padding:7px 4px;width:auto;border-radius:10px}
+    aside>button.btn.ghost .lbl{font-size:9.5px;color:var(--hivora);font-weight:600}
+    h1{font-size:17px}
+    .sub{font-size:11.5px}
+    .card{padding:10px 12px}.card .v{font-size:20px}
+    .page-head{flex-direction:column}
+    .page-head .actions{width:100%}.page-head .actions .btn{flex:1}
+    .split{grid-template-columns:1fr;height:auto}
+    .list{max-height:30dvh}
+    .thread{height:56dvh}
+    .panel{padding:12px;overflow-x:auto}
+    #appt-table,#renew-table{min-width:560px}
+    #lang-btn{top:8px;right:10px;padding:5px 10px}
+    .gpts{grid-template-columns:1fr;height:auto}
+    .gpts .col+.col{border-left:0;border-top:1px solid var(--line)}
+    .gpts .col-scroll{max-height:38dvh}
+    #cust-overlay>div{border-radius:0!important;max-width:100vw!important;
+      width:100vw!important;height:100dvh!important}
+  }
+  /* SVG 图标 + 更多弹层 */
+  .nic{width:17px;height:17px;flex-shrink:0}
+  nav button .nic{color:var(--dim)}
+  nav button.on .nic{color:var(--hivora)}
+  aside>button.btn.ghost{display:flex;align-items:center;justify-content:center;gap:7px}
+  aside>button.btn.ghost .nic{width:15px;height:15px}
+  #more-btn{display:none}
+  .lbl-s{display:none}
+  #more-sheet{position:fixed;left:12px;right:12px;
+    bottom:calc(76px + env(safe-area-inset-bottom,0px));z-index:36;
+    background:var(--panel);border:1px solid var(--line);border-radius:18px;
+    padding:12px 6px;box-shadow:0 14px 44px rgba(23,35,60,.2);
+    display:grid;grid-template-columns:repeat(4,1fr);gap:4px;
+    animation:pop .18s ease-out}
+  #more-sheet.hide{display:none}
+  #more-sheet button{display:flex;flex-direction:column;align-items:center;gap:7px;
+    background:none;border:0;padding:12px 4px;border-radius:12px;font-size:10.5px;
+    color:var(--text);cursor:pointer}
+  #more-sheet button .nic{width:21px;height:21px;color:var(--hivora)}
+  #more-sheet button:active{background:var(--hivora-light)}
+  @media(max-width:768px){
+    nav button .lbl{display:none}
+    nav button .lbl-s{display:block;font-size:9.5px;line-height:1;
+      color:var(--dim);font-weight:500}
+    nav button.on .lbl-s{color:var(--hivora-dark);font-weight:700}
+    nav button{min-width:0;flex:1 1 0;padding:8px 2px}
+    nav button .nic{width:21px;height:21px}
+    .m-more{display:none!important}
+    aside>button.btn.ghost{display:none!important}
+    aside{overflow:visible;gap:0}
+    #more-btn{position:relative;display:flex;flex:1 1 0;min-width:0;
+      flex-direction:column;align-items:center;justify-content:center;gap:3px;
+      padding:8px 2px;background:none;border:0;border-radius:10px;
+      color:var(--text);cursor:pointer}
+    #more-btn .nic{width:21px;height:21px;color:var(--dim)}
+    #more-btn .lbl-s{display:block;font-size:9.5px;color:var(--dim);font-weight:500}
+    #more-btn .badge{position:absolute;top:2px;right:14px;margin:0}
+  }
+  /* 数据化 KPI 卡 + 头像 */
+  .card .top{display:flex;justify-content:space-between;align-items:center;
+    gap:8px;margin-bottom:8px}
+  .card .mid{display:flex;justify-content:space-between;align-items:flex-end;gap:12px}
+  .delta{font-size:10.5px;font-weight:700;border-radius:99px;padding:2.5px 8px;
+    white-space:nowrap;flex-shrink:0}
+  .delta.up{background:#e7f7f0;color:var(--green)}
+  .delta.down{background:#fdeae4;color:var(--red)}
+  .delta.warn{background:#fdf3e3;color:var(--orange)}
+  .spark2{width:88px;height:38px;display:block;flex-shrink:0}
+  .av{width:26px;height:26px;border-radius:50%;display:inline-flex;align-items:center;
+    justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0}
+  .li .who{display:flex;align-items:center;gap:8px;min-width:0}
+  .li .who .tx{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* 总览大面板 */
+  .grid2a{display:grid;grid-template-columns:2fr 3fr;gap:14px}
+  @media(max-width:900px){.grid2a{grid-template-columns:1fr}}
+  .pf-wrap{display:flex;gap:18px;align-items:center;flex-wrap:wrap;padding:4px 0}
+  .pf-donut{width:136px;height:136px;flex-shrink:0}
+  .pf-num{font-size:14px;font-weight:800;fill:var(--text)}
+  .pf-sub{font-size:8.5px;fill:var(--dim)}
+  .pf-legend{flex:1;min-width:160px;display:flex;flex-direction:column;gap:8px}
+  .pf-row{display:flex;align-items:center;gap:8px;font-size:12.5px}
+  .pf-row .dot{width:9px;height:9px;border-radius:3px;flex-shrink:0}
+  .pf-name{color:var(--dim);flex:1}
+  .pf-pct{color:var(--dim);width:36px;text-align:right;font-variant-numeric:tabular-nums}
+  .tr-stats{display:flex;gap:10px;margin-top:12px}
+  .tr-stats>div{flex:1;background:#f7f9fd;border:1px solid var(--line);
+    border-radius:10px;padding:9px 10px;text-align:center}
+  .tr-stats b{font-size:16px;display:block;font-variant-numeric:tabular-nums}
+  .tr-stats span{font-size:10.5px;color:var(--dim)}
+  .axis{font-size:9.5px;fill:var(--dim)}
+  .gridln{stroke:var(--line);stroke-width:1}
+  #dash-table{min-width:640px}
+  #dash-table td{vertical-align:middle}
+  #dash-table .who{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+  .tychip{border-radius:6px;padding:2px 8px;font-size:11px;background:#f0f4fc;
+    color:var(--hivora-dark);font-weight:600;white-space:nowrap}
+  /* 月历 */
+  .cal-head{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;font-size:10.5px;
+    color:var(--dim);margin:10px 0 6px;text-align:center;font-weight:600}
+  .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+  .cal-d{min-height:78px;border:1px solid var(--line);border-radius:10px;
+    padding:5px 6px;background:#fbfdff}
+  .cal-d.out{background:transparent;border:0}
+  .cal-d.today{border-color:var(--hivora);background:var(--hivora-light)}
+  .cal-n{font-size:11px;color:var(--dim);font-weight:600}
+  .cal-d.today .cal-n{color:var(--hivora-dark)}
+  .cal-ev{background:var(--hivora);color:#fff;border-radius:6px;padding:2px 6px;
+    font-size:10px;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .icobtn{background:none;border:0;color:var(--dim);cursor:pointer;font-size:13px;
+    padding:2px 6px;border-radius:6px}
+  .icobtn:hover{color:var(--hivora);background:var(--hivora-light)}
+  @media(max-width:768px){.cal-d{min-height:48px;padding:3px 4px}
+    .cal-ev{width:7px;height:7px;padding:0;border-radius:50%;font-size:0;margin:3px auto 0}}
+</style>
+</head>
+<body>
+<aside>
+  <div class="brand"><div class="logo">H</div>
+    <div><b>Hivora</b><span>Insurance Agent · STAGE</span></div></div>
+  <div class="sec">经营</div>
+  <nav>
+    <button data-v="dash" class="on"><svg class="nic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg><span class="lbl">总览</span><span class="lbl-s">总览</span></button>
+  </nav>
+  <div class="sec">AI HIVORA</div>
+  <nav>
+    <button data-v="inbox"><svg class="nic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg><span class="lbl">客户对话</span><span class="lbl-s">对话</span><span class="badge" id="b-inbox"></span></button>
+    <button data-v="train"><svg class="nic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10 12 5 2 10l10 5 10-5z"/><path d="M6 12v5c0 1.66 2.69 3 6 3s6-1.34 6-3v-5"/></svg><span class="lbl">训练 & 问 Hivora</span><span class="lbl-s">训练</span></button>
+  </nav>
+  <div class="sec">展业</div>
+  <nav>
+    <button data-v="clients"><svg class="nic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span class="lbl">客户数据库</span><span class="lbl-s">客户</span></button>
+    <button data-v="products" class="m-more"><svg class="nic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg><span class="lbl">产品目录</span></button>
+    <button data-v="calendar" class="m-more"><svg class="nic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg><span class="lbl">预约日历</span></button>
+    <button data-v="renewals" class="m-more"><svg class="nic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg><span class="lbl">续保管道</span><span class="badge" id="b-renew"></span></button>
+  </nav>
+  <button id="more-btn" onclick="toggleMore()"><svg class="nic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg><span class="lbl-s" id="more-lbl">更多</span><span class="badge" id="b-more"></span></button>
+  <div class="foot" style="margin-top:auto"><span id="foot-model">…</span> · LangGraph<br>agent_demo · PDPA 隔离</div>
+  <button class="btn ghost" style="width:100%" onclick="openCustomer()"><svg class="nic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg> <span class="lbl" id="cust-lbl">客户看到的 →</span></button>
+</aside>
+
+<div id="more-sheet" class="hide">
+  <button onclick="sheetGo('products')"><svg class="nic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg><span id="ms-products">产品目录</span></button>
+  <button onclick="sheetGo('calendar')"><svg class="nic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg><span id="ms-calendar">预约日历</span></button>
+  <button onclick="sheetGo('renewals')"><svg class="nic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg><span id="ms-renewals">续保管道</span></button>
+  <button onclick="sheetCust()"><svg class="nic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg><span id="ms-cust">客户看到的</span></button>
+</div>
+
+<main>
+  <!-- 总览 -->
+  <section id="v-dash">
+    <h1>今日总览</h1><div class="sub" id="dash-date"></div>
+    <div class="cards" id="dash-cards"></div>
+    <div class="grid2a">
+      <div class="panel" style="margin:0">
+        <h3 id="pf-title">保单组合</h3>
+        <div id="pf-body"></div>
+      </div>
+      <div class="panel" style="margin:0">
+        <h3 id="tr-title">近 7 天 AI 活跃度</h3>
+        <div id="tr-body"></div>
+      </div>
+    </div>
+    <div class="panel" style="margin-top:16px">
+      <h3 id="ac-title">本周动态明细</h3>
+      <div style="overflow-x:auto"><table id="dash-table"></table></div>
+    </div>
+  </section>
+
+  <!-- 客户对话 -->
+  <section id="v-inbox" class="hide">
+    <h1>客户对话</h1>
+    <div class="sub">客户 WhatsApp 消息 → AI 草拟 → 你确认后发送（AI 不直接面对客户）</div>
+    <div class="split">
+      <div class="list" id="inbox-list"></div>
+      <div class="thread" id="thread">
+        <div class="thr-head" style="color:var(--dim);font-weight:400">← 选择一个对话</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 训练 & 问（GPTs 编辑器布局：左 Create · 右 Preview）-->
+  <section id="v-train" class="hide">
+    <div class="page-head">
+      <div><h1>训练 & 问 Hivora</h1>
+        <div class="sub">左边教它（像教新员工）· 右边实时预览效果</div></div>
+    </div>
+    <div class="gpts">
+      <div class="col">
+        <div class="col-head">🎓 训练</div>
+        <div class="col-scroll">
+          <div class="sub" style="margin-bottom:10px">把产品、价格、规则告诉它——教过的知识会立刻用于右边预览和客户对话草拟。</div>
+          <div id="facts"></div>
+        </div>
+        <div class="col-foot">
+          <div class="row">
+            <input id="fact-in" placeholder="例如：CarePlus 360 月缴 RM250 起…" style="flex:1">
+            <button class="btn" onclick="addFact()">教给它</button>
+          </div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="col-head">💬 预览</div>
+        <div class="col-scroll" id="try-box" style="display:flex;flex-direction:column;gap:8px"></div>
+        <div class="col-foot">
+          <div class="row">
+            <input id="try-in" placeholder="问条款 / 查客户 / 要话术 / 试刚教的知识…" style="flex:1">
+            <button class="btn" onclick="tryAsk()">发送</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 客户保单 -->
+  <section id="v-clients" class="hide">
+    <div class="page-head">
+      <div><h1>客户数据库</h1>
+        <div class="sub">你自己的 client book（按代理人隔离）· 也可以直接对 Hivora 说「帮我加客户 Ahmad，电话 012-3456789」</div></div>
+      <div class="actions">
+        <button class="btn ghost" onclick="openModal('policy')">＋ 加保单</button>
+        <button class="btn" onclick="openModal('client')">＋ 新增客户</button>
+      </div>
+    </div>
+    <div id="client-cards"></div>
+  </section>
+
+  <!-- 产品目录 -->
+  <section id="v-products" class="hide">
+    <div class="page-head">
+      <div><h1>产品目录</h1>
+        <div class="sub">各产品价格与内容一览（条款细节问 Hivora，带出处）· 也可以直接对 Hivora 说「帮我加产品 XX」</div></div>
+      <div class="actions">
+        <button class="btn" onclick="openModal('product')">＋ 新增产品</button>
+      </div>
+    </div>
+    <div class="cards" id="prod-cards" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))"></div>
+  </section>
+
+  <!-- 预约日历 -->
+  <section id="v-calendar" class="hide">
+    <div class="page-head">
+      <div><h1>预约日历</h1>
+        <div class="sub">和客户的面谈 / 通话安排，按时间排序 · 也可以直接对 Hivora 说「帮我安排周三 3pm 和 XX 面谈」</div></div>
+      <div class="actions">
+        <button class="btn" onclick="openModal('appt')">＋ 新增预约</button>
+      </div>
+    </div>
+    <div class="panel">
+      <h3 id="cal-month"></h3>
+      <div class="cal-head" id="cal-head"></div>
+      <div class="cal" id="cal-grid"></div>
+    </div>
+    <div class="panel"><table id="appt-table"></table></div>
+  </section>
+
+  <!-- 续保 -->
+  <section id="v-renewals" class="hide">
+    <h1>续保管道</h1>
+    <div class="sub">按到期日排序 —— 该联系谁一目了然</div>
+    <div class="panel"><table id="renew-table"></table></div>
+  </section>
+</main>
+
+<!-- 客户视角：WhatsApp 手机壳全屏覆盖 -->
+<div id="cust-overlay" class="hide" style="position:fixed;inset:0;background:#111a;z-index:50;
+     align-items:center;justify-content:center">
+  <div style="width:380px;max-width:94vw;height:min(760px,94dvh);background:#efeae2;
+       border-radius:24px;overflow:hidden;display:flex;flex-direction:column;
+       box-shadow:0 20px 60px rgba(0,0,0,.4)">
+    <div style="background:#075e54;color:#fff;padding:12px 14px;display:flex;
+         align-items:center;gap:10px">
+      <div style="width:34px;height:34px;border-radius:50%;background:#fff;color:#075e54;
+           display:flex;align-items:center;justify-content:center;font-weight:800">XT</div>
+      <div style="line-height:1.2;flex:1">
+        <b style="font-size:14px">XT · 保险代理人</b><br>
+        <span style="font-size:11px;opacity:.8">WhatsApp · online</span>
+      </div>
+      <select id="cust-sel" onchange="loadCustomer()" style="border:0;border-radius:8px;
+        padding:4px 6px;font-size:11px;max-width:110px"></select>
+      <button onclick="closeCustomer()" style="background:none;border:0;color:#fff;
+        font-size:18px;cursor:pointer">✕</button>
+    </div>
+    <div id="cust-msgs" style="flex:1;overflow-y:auto;padding:12px;display:flex;
+         flex-direction:column;gap:6px;
+         background:#efeae2"></div>
+    <div style="display:flex;gap:8px;padding:8px;background:#f0f2f5">
+      <input id="cust-in" placeholder="Message" style="flex:1;border-radius:20px;border:0;
+        padding:10px 14px;font-size:13px;outline:none;background:#fff">
+      <button onclick="custSend()" style="background:#075e54;color:#fff;border:0;
+        border-radius:50%;width:40px;height:40px;font-size:16px;cursor:pointer">➤</button>
+    </div>
+  </div>
+</div>
+
+<button id="lang-btn" onclick="toggleLang()" aria-label="Switch language">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.9 5.7 3.9 9S14.5 18.4 12 21c-2.5-2.6-3.9-5.7-3.9-9S9.5 5.6 12 3z"/></svg>
+  <span id="lang-label">EN</span>
+</button>
+
+<!-- 新增弹窗 -->
+<div id="modal" class="hide" onclick="if(event.target===this)closeModal()">
+  <div id="modal-panel">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <h3 id="modal-title" style="font-size:15px"></h3>
+      <button onclick="closeModal()" aria-label="关闭"
+        style="background:none;border:0;font-size:16px;color:var(--dim);cursor:pointer">✕</button>
+    </div>
+    <div id="modal-body"></div>
+    <div class="merr" id="modal-err"></div>
+    <div class="row" style="justify-content:flex-end;margin-top:16px">
+      <button class="btn ghost" onclick="closeModal()">取消</button>
+      <button class="btn" id="modal-save">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $=q=>document.querySelector(q);
+const api=(p,opt)=>fetch("/api/"+p,opt).then(r=>r.json());
+
+/* ── i18n（中/英）── */
+const I18N={
+ zh:{nav_biz:"经营",nav_ai:"AI HIVORA",nav_work:"展业",dash:"总览",inbox:"客户对话",
+  train:"训练 & 问 Hivora",clients:"客户数据库",products:"产品目录",calendar:"预约日历",
+  renewals:"续保管道",cust_view:"客户看到的 →",p_portfolio:"保单组合",p_trend:"近 7 天 AI 活跃度",p_activity:"本周动态明细",th_time:"时间",th_type:"类型",th_detail:"详情",ty_msg:"消息",ty_renewal:"续保",ty_appt:"预约",pf_month:"月保费",pf_active:"在保保单",handled:"AI 已答占比",drafts:"生成草稿",actions:"AI 录入",n_dash:"总览",n_inbox:"对话",n_train:"训练",n_clients:"客户",more:"更多",
+  dash_t:"今日总览",inbox_t:"客户对话",inbox_s:"客户 WhatsApp 消息 → AI 草拟 → 你确认后发送（AI 不直接面对客户）",
+  train_t:"训练 & 问 Hivora",train_s:"左边教它（像教新员工）· 右边实时预览效果",
+  clients_t:"客户数据库",clients_s:"你自己的 client book（按代理人隔离）· 也可以直接对 Hivora 说「帮我加客户 Ahmad，电话 012-3456789」",
+  products_t:"产品目录",products_s:"各产品价格与内容一览（条款细节问 Hivora，带出处）· 也可以直接对 Hivora 说「帮我加产品 XX」",
+  calendar_t:"预约日历",calendar_s:"和客户的面谈 / 通话安排，按时间排序 · 也可以直接对 Hivora 说「帮我安排周三 3pm 和 XX 面谈」",
+  renewals_t:"续保管道",renewals_s:"按到期日排序 —— 该联系谁一目了然",
+  col_train:"🎓 训练",col_preview:"💬 预览",
+  train_hint:"把产品、价格、规则告诉它——教过的知识会立刻用于右边预览和客户对话草拟。",
+  teach_ph:"例如：CarePlus 360 月缴 RM250 起…",teach_btn:"教给它",
+  ask_ph:"问条款 / 查客户 / 要话术 / 试刚教的知识…",send:"发送",
+  add_client:"＋ 新增客户",add_policy:"＋ 加保单",add_product:"＋ 新增产品",add_appt:"＋ 新增预约",
+  k_clients:"客户",k_policies:"保单",k_renew:"30天内续保",k_pending:"待确认回复",
+  k_ai:"AI 处理率",k_appts:"7天内预约",k_facts:"知识条数",
+  s_clients:"client book",s_policies:"在保",s_renew:"要跟进",s_pending:"客户在等",
+  s_ai:"已答对话占比",s_appts:"面谈/通话",s_facts:"已教给 Hivora",
+  p_renew:"⏰ 30 天内续保",p_pending:"💬 待处理客户消息",p_appts:"📅 未来 7 天预约",
+  today:"今天",d_later:"{n} 天后",wait_reply:"待回复",none:"无",all_done:"全部处理完 ✅",
+  st_pending:"待处理",st_drafted:"草稿待确认",st_sent:"已回复",
+  suggest3:"✨ 建议回复 ×3",to_human:"🙋 转人工处理",human_on:"🙋 人工处理中 · AI 已退出",
+  back_ai:"🤖 恢复 AI 协助",human:"人工",sent_note:"✅ 已回复。客户再来消息会出现在这里。",
+  pick_thread:"← 选择一个对话",reply_ph:"自己写，或点上面的建议回复填入…",
+  reply_ph_human:"人工回复…",sugg_pick:"点击填入",sugg_styles:["💼 专业详细","😊 亲切热情","⚡ 简短快捷"],
+  suggesting:"Hivora 生成 3 条建议中",thinking:"Hivora 思考中",analyzing:"Hivora 分析中",
+  opp_btn:"✨ 加保机会分析",opp_cap:"✨ 加保机会（仅供参考）",
+  th_product:"产品",th_no:"保单号",th_premium:"保费",th_renewal:"续保日",th_status:"状态",
+  th_client:"客户",th_purpose:"目的",th_channel:"方式/地点",th_urgency:"紧迫度",
+  th_date:"日期",th_time:"时间",expired:"已过期",valid:"有效",no_policy:"暂无保单",
+  expired_n:"已过期 {n} 天",past:"已过",
+  edit:"编辑",m_editc:"编辑客户",m_editp:"编辑保单",m_client:"新增客户",m_policy:"给客户加保单",m_product:"新增产品",m_appt:"新增预约",
+  f_name:"姓名 *",f_phone:"电话",f_notes:"备注",f_client:"客户姓名 *",f_product:"产品 *",
+  f_pno:"保单号",f_premium:"保费",f_renewal:"续保日",f_pname:"产品名 *",f_type:"类型",
+  f_price:"价格区间",f_high:"要点（逗号分隔）",f_who:"客户 *",f_date:"日期 *",f_time:"时间",
+  f_purpose:"目的",f_channel:"方式/地点",
+  cancel:"取消",save:"保存",need_required:"请填写必填项（*）",save_fail:"保存失败，请重试",
+  route_policy:"Policy 条款",route_clientbook:"ClientBook 客户",route_drafting:"Drafting 话术",
+  route_chat:"Chat",route_action:"Action 录入",route_fallback:"Fallback",to_human_chip:"🙋 转人工"},
+ en:{nav_biz:"BUSINESS",nav_ai:"AI HIVORA",nav_work:"SALES",dash:"Overview",inbox:"Client Chats",
+  train:"Train & Ask Hivora",clients:"Client Database",products:"Products",calendar:"Calendar",
+  renewals:"Renewals",cust_view:"Customer view →",p_portfolio:"Portfolio",p_trend:"AI Activity (7 days)",p_activity:"Weekly Activity",th_time:"Time",th_type:"Type",th_detail:"Detail",ty_msg:"Message",ty_renewal:"Renewal",ty_appt:"Appt",pf_month:"premium /mo",pf_active:"Active policies",handled:"AI answered",drafts:"Drafts",actions:"AI entries",n_dash:"Home",n_inbox:"Chats",n_train:"Train",n_clients:"Clients",more:"More",
+  dash_t:"Today's Overview",inbox_t:"Client Chats",inbox_s:"Client WhatsApp message → AI drafts → you confirm & send (AI never talks to clients directly)",
+  train_t:"Train & Ask Hivora",train_s:"Teach it on the left (like a new hire) · live preview on the right",
+  clients_t:"Client Database",clients_s:"Your own client book (isolated per agent) · or just tell Hivora \"Add client Ahmad, phone 012-3456789\"",
+  products_t:"Product Catalog",products_s:"Prices & coverage at a glance (ask Hivora for policy details, with citations) · or tell Hivora \"Add product XX\"",
+  calendar_t:"Appointments",calendar_s:"Meetings & calls with clients, sorted by time · or tell Hivora \"Book Wed 3pm with XX\"",
+  renewals_t:"Renewal Pipeline",renewals_s:"Sorted by due date — know exactly who to contact",
+  col_train:"🎓 Train",col_preview:"💬 Preview",
+  train_hint:"Teach it products, prices and rules — everything is used instantly in the preview and client-chat drafts.",
+  teach_ph:"e.g. CarePlus 360 from RM250/month…",teach_btn:"Teach",
+  ask_ph:"Ask policy / clients / drafts / test what you taught…",send:"Send",
+  add_client:"＋ New Client",add_policy:"＋ Add Policy",add_product:"＋ New Product",add_appt:"＋ New Appointment",
+  k_clients:"Clients",k_policies:"Policies",k_renew:"Renewals in 30d",k_pending:"Pending Replies",
+  k_ai:"AI Handled",k_appts:"Appts in 7d",k_facts:"Knowledge",
+  s_clients:"client book",s_policies:"active",s_renew:"to follow up",s_pending:"clients waiting",
+  s_ai:"of chats answered",s_appts:"meetings/calls",s_facts:"taught to Hivora",
+  p_renew:"⏰ Renewals in 30 days",p_pending:"💬 Pending client messages",p_appts:"📅 Next 7 days",
+  today:"Today",d_later:"in {n}d",wait_reply:"pending",none:"None",all_done:"All done ✅",
+  st_pending:"Pending",st_drafted:"Draft ready",st_sent:"Replied",
+  suggest3:"✨ Suggest ×3",to_human:"🙋 Take over",human_on:"🙋 Human mode · AI paused",
+  back_ai:"🤖 Resume AI",human:"Human",sent_note:"✅ Replied. New client messages will appear here.",
+  pick_thread:"← Pick a conversation",reply_ph:"Type your reply, or click a suggestion above…",
+  reply_ph_human:"Reply manually…",sugg_pick:"click to use",sugg_styles:["💼 Professional","😊 Friendly","⚡ Short & quick"],
+  suggesting:"Hivora is drafting 3 suggestions",thinking:"Hivora is thinking",analyzing:"Hivora is analyzing",
+  opp_btn:"✨ Upsell Analysis",opp_cap:"✨ Upsell opportunities (for reference)",
+  th_product:"Product",th_no:"Policy No.",th_premium:"Premium",th_renewal:"Renewal",th_status:"Status",
+  th_client:"Client",th_purpose:"Purpose",th_channel:"Channel/Venue",th_urgency:"Urgency",
+  th_date:"Date",th_time:"Time",expired:"Expired",valid:"Active",no_policy:"No policies yet",
+  expired_n:"Expired {n}d ago",past:"Past",
+  edit:"Edit",m_editc:"Edit Client",m_editp:"Edit Policy",m_client:"New Client",m_policy:"Add Policy to Client",m_product:"New Product",m_appt:"New Appointment",
+  f_name:"Name *",f_phone:"Phone",f_notes:"Notes",f_client:"Client name *",f_product:"Product *",
+  f_pno:"Policy no.",f_premium:"Premium",f_renewal:"Renewal date",f_pname:"Product name *",f_type:"Type",
+  f_price:"Price range",f_high:"Highlights (comma separated)",f_who:"Client *",f_date:"Date *",f_time:"Time",
+  f_purpose:"Purpose",f_channel:"Channel/Venue",
+  cancel:"Cancel",save:"Save",need_required:"Please fill required fields (*)",save_fail:"Save failed, try again",
+  route_policy:"Policy",route_clientbook:"ClientBook",route_drafting:"Drafting",
+  route_chat:"Chat",route_action:"Action",route_fallback:"Fallback",to_human_chip:"🙋 Escalate"}
+};
+let LANG=localStorage.getItem("hivora_lang")||"zh";
+const t=(k,n)=>{let s=(I18N[LANG][k]??I18N.zh[k]??k);return n!==undefined?s.replace("{n}",n):s;};
+function toggleLang(){LANG=LANG==="zh"?"en":"zh";localStorage.setItem("hivora_lang",LANG);applyLang();}
+function applyLang(){
+  $("#lang-label").textContent=LANG==="zh"?"EN":"中文";
+  document.documentElement.lang=LANG;
+  const S={'[data-v="dash"] .lbl':"dash",'[data-v="inbox"] .lbl':"inbox",
+    '[data-v="train"] .lbl':"train",'[data-v="clients"] .lbl':"clients",
+    '[data-v="products"] .lbl':"products",'[data-v="calendar"] .lbl':"calendar",
+    '[data-v="renewals"] .lbl':"renewals",
+    '[data-v="dash"] .lbl-s':"n_dash",'[data-v="inbox"] .lbl-s':"n_inbox",
+    '[data-v="train"] .lbl-s':"n_train",'[data-v="clients"] .lbl-s':"n_clients",
+    "#more-lbl":"more","#ms-products":"products","#ms-calendar":"calendar",
+    "#ms-renewals":"renewals","#ms-cust":"cust_view",
+    "#v-dash h1":"dash_t","#v-inbox h1":"inbox_t","#v-inbox .sub":"inbox_s",
+    "#v-train h1":"train_t","#v-train .page-head .sub":"train_s",
+    "#v-clients h1":"clients_t","#v-clients .page-head .sub":"clients_s",
+    "#v-products h1":"products_t","#v-products .page-head .sub":"products_s",
+    "#v-calendar h1":"calendar_t","#v-calendar .page-head .sub":"calendar_s",
+    "#v-renewals h1":"renewals_t","#v-renewals .sub":"renewals_s",
+    "#v-train .col:first-child .col-head":"col_train",
+    "#v-train .col:last-child .col-head":"col_preview",
+    "#v-train .col-scroll .sub":"train_hint",
+    "#pf-title":"p_portfolio","#tr-title":"p_trend","#ac-title":"p_activity"};
+  for(const[sel,key]of Object.entries(S)){const el=$(sel);if(el)el.textContent=t(key);}
+  document.querySelectorAll(".sec")[0].textContent=t("nav_biz");
+  document.querySelectorAll(".sec")[1].textContent=t("nav_ai");
+  document.querySelectorAll(".sec")[2].textContent=t("nav_work");
+  $("#cust-lbl").textContent=t("cust_view");
+  $("#fact-in").placeholder=t("teach_ph");
+  $("#try-in").placeholder=t("ask_ph");
+  $("#v-train .col:first-child .col-foot .btn").textContent=t("teach_btn");
+  $("#v-train .col:last-child .col-foot .btn").textContent=t("send");
+  $('#v-clients .actions .btn.ghost').textContent=t("add_policy");
+  $('#v-clients .actions .btn:not(.ghost)').textContent=t("add_client");
+  $('#v-products .actions .btn').textContent=t("add_product");
+  $('#v-calendar .actions .btn').textContent=t("add_appt");
+  $("#modal .row .btn.ghost").textContent=t("cancel");
+  $("#modal-save").textContent=t("save");
+  const cur=document.querySelector("nav button.on");
+  if(cur){({dash:loadDash,inbox:loadInbox,train:loadFacts,clients:loadClients,
+    renewals:loadRenewals,products:loadProducts,calendar:loadAppts}[cur.dataset.v]||(()=>{}))();}
+}
+const post=(p,body)=>api(p,{method:"POST",headers:{"Content-Type":"application/json"},
+                            body:JSON.stringify(body||{})});
+let curThread=null;
+function goView(v){document.querySelector(`[data-v="${v}"]`).click();}
+function toggleMore(){$("#more-sheet").classList.toggle("hide");}
+function sheetGo(v){$("#more-sheet").classList.add("hide");goView(v);}
+function sheetCust(){$("#more-sheet").classList.add("hide");openCustomer();}
+function goInbox(id){goView("inbox");openThread(id);}
+
+/* ── 导航 ── */
+document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{
+  $("#more-sheet").classList.add("hide");
+  document.querySelectorAll("nav button").forEach(x=>x.classList.remove("on"));
+  b.classList.add("on");
+  document.querySelectorAll("main section").forEach(s=>s.classList.add("hide"));
+  $("#v-"+b.dataset.v).classList.remove("hide");
+  ({dash:loadDash,inbox:loadInbox,train:loadFacts,clients:loadClients,
+    renewals:loadRenewals,products:loadProducts,calendar:loadAppts}[b.dataset.v]||(()=>{}))();
+});
+
+/* ── 数据化小组件 ── */
+const AV_COLORS=["#1e6bf0","#7c3aed","#0e9f6e","#e8930c","#e0552f","#0e7490"];
+function av(name){
+  let h=0;for(const c of name)h=(h*31+c.charCodeAt(0))>>>0;
+  const ini=name.trim().split(/[\s(]+/).map(w=>w[0]).slice(0,2).join("").toUpperCase();
+  return `<span class="av" style="background:${AV_COLORS[h%AV_COLORS.length]}">${ini}</span>`;
+}
+function sparkBars(vals){
+  const w=88,h=38,n=vals.length,gap=4,bw=(w-gap*(n-1))/n,max=Math.max(...vals,1);
+  return `<svg class="spark2" viewBox="0 0 ${w} ${h}" aria-hidden="true">`+vals.map((v,i)=>{
+    const bh=Math.max(4,v/max*(h-4)),x=i*(bw+gap),r=Math.min(3.5,bw/2);
+    return `<rect x="${x.toFixed(1)}" y="${(h-bh).toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" rx="${r}" fill="${i===n-1?"var(--hivora)":"#CBDCFB"}"/>`;
+  }).join("")+`</svg>`;
+}
+let _sgid=0;
+function sparkLine(vals){
+  const w=88,h=38,max=Math.max(...vals),min=Math.min(...vals);
+  const X=i=>3+i/(vals.length-1)*(w-8), Y=v=>h-5-((v-min)/(max-min||1))*(h-12);
+  const p=vals.map((v,i)=>[X(i),Y(v)]);
+  let d=`M${p[0][0].toFixed(1)},${p[0][1].toFixed(1)}`;
+  for(let i=1;i<p.length;i++){const[x0,y0]=p[i-1],[x1,y1]=p[i],mx=((x0+x1)/2).toFixed(1);
+    d+=` C${mx},${y0.toFixed(1)} ${mx},${y1.toFixed(1)} ${x1.toFixed(1)},${y1.toFixed(1)}`;}
+  const last=p[p.length-1], id="sg"+(_sgid++);
+  const area=d+` L${last[0].toFixed(1)},${h} L${p[0][0].toFixed(1)},${h} Z`;
+  return `<svg class="spark2" viewBox="0 0 ${w} ${h}" aria-hidden="true">
+    <defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--hivora)" stop-opacity=".16"/>
+      <stop offset="1" stop-color="var(--hivora)" stop-opacity="0"/></linearGradient></defs>
+    <path d="${area}" fill="url(#${id})"/>
+    <path d="${d}" fill="none" stroke="var(--hivora)" stroke-width="2"
+      stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="3"
+      fill="var(--hivora)" stroke="#fff" stroke-width="1.5"/></svg>`;
+}
+function kpiCard(label,val,sub,vColor,trend,delta,cls,line){
+  return `<div class="card">
+    <div class="top"><span class="k">${label}</span><span class="delta ${cls}">${delta}</span></div>
+    <div class="mid"><span class="v"${vColor?` style="color:${vColor}"`:""}>${val}</span>
+    ${line?sparkLine(trend):sparkBars(trend)}</div>
+    <div class="s">${sub}</div></div>`;
+}
+
+/* ── 总览 ── */
+function tyLabel(x){const M={"医疗险":"Medical","定期寿险":"Term Life","车险":"Motor",
+  "寿险":"Life","保险":"Insurance","其他":"Other"};return LANG==="en"?(M[x]||x):x;}
+function donut(segs,total,count){
+  const C=2*Math.PI*40; let off=0;
+  const circles=segs.map(s=>{const frac=s.v/(total||1),len=Math.max(0,frac*C-2.5);
+    const el=`<circle cx="60" cy="60" r="40" fill="none" stroke="${s.color}" stroke-width="15"
+      stroke-dasharray="${len.toFixed(1)} ${(C-len).toFixed(1)}"
+      stroke-dashoffset="${(-off).toFixed(1)}" transform="rotate(-90 60 60)"/>`;
+    off+=frac*C; return el;}).join("");
+  return `<div class="pf-wrap"><svg viewBox="0 0 120 120" class="pf-donut" aria-hidden="true">${circles}
+    <text x="60" y="57" text-anchor="middle" class="pf-num">RM ${total.toLocaleString()}</text>
+    <text x="60" y="72" text-anchor="middle" class="pf-sub">${t("pf_month")}</text></svg>
+    <div class="pf-legend">
+    ${segs.map(s=>`<div class="pf-row"><span class="dot" style="background:${s.color}"></span>
+      <span class="pf-name">${s.label}</span><b>RM ${s.v.toLocaleString()}</b>
+      <span class="pf-pct">${Math.round(s.v/(total||1)*100)}%</span></div>`).join("")}
+    <div class="pf-row" style="border-top:1px solid var(--line);padding-top:9px;margin-top:3px">
+      <span class="pf-name">${t("pf_active")}</span><b>${count}</b><span class="pf-pct"></span></div>
+    </div></div>`;
+}
+function bigLine(vals,labels){
+  const w=560,h=150,pl=10,pr=34,bot=24,max=Math.max(...vals),min=Math.min(...vals);
+  const X=i=>pl+i/(vals.length-1)*(w-pl-pr), Y=v=>14+(1-(v-min)/(max-min||1))*(h-bot-28);
+  const p=vals.map((v,i)=>[X(i),Y(v)]);
+  let d=`M${p[0][0].toFixed(1)},${p[0][1].toFixed(1)}`;
+  for(let i=1;i<p.length;i++){const[x0,y0]=p[i-1],[x1,y1]=p[i],mx=((x0+x1)/2).toFixed(1);
+    d+=` C${mx},${y0.toFixed(1)} ${mx},${y1.toFixed(1)} ${x1.toFixed(1)},${y1.toFixed(1)}`;}
+  const last=p[p.length-1];
+  const area=d+` L${last[0].toFixed(1)},${h-bot} L${p[0][0].toFixed(1)},${h-bot} Z`;
+  const grid=[0.0,0.5,1.0].map(f=>{const y=(14+f*(h-bot-28)).toFixed(1);
+    return `<line class="gridln" x1="${pl}" y1="${y}" x2="${w-pr}" y2="${y}"/>`;}).join("");
+  const xlab=labels.map((L,i)=>`<text class="axis" x="${X(i).toFixed(1)}" y="${h-8}" text-anchor="middle">${L}</text>`).join("");
+  return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto;display:block" aria-hidden="true">
+    <defs><linearGradient id="blg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--hivora)" stop-opacity=".14"/>
+      <stop offset="1" stop-color="var(--hivora)" stop-opacity="0"/></linearGradient></defs>
+    ${grid}<path d="${area}" fill="url(#blg)"/>
+    <path d="${d}" fill="none" stroke="var(--hivora)" stroke-width="2.5"
+      stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="3.5"
+      fill="var(--hivora)" stroke="#fff" stroke-width="1.5"/>
+    <text x="${(last[0]+6).toFixed(1)}" y="${(last[1]-8).toFixed(1)}"
+      style="font-size:11px;font-weight:700" fill="var(--hivora)">${vals[vals.length-1]}%</text>
+    ${xlab}</svg>`;
+}
+async function loadDash(){
+  const d=await api("dashboard");
+  $("#dash-date").textContent=t("today")+" "+d.today+" · agent_demo";
+  $("#foot-model").textContent=d.model;
+  $("#dash-cards").innerHTML=
+    kpiCard(t("k_clients"),d.clients,t("s_clients"),"",[1,1,2,2,3,3,d.clients],"▲ 1","up")+
+    kpiCard(t("k_policies"),d.policies,t("s_policies"),"",[2,2,3,3,3,4,d.policies],"▲ 1","up")+
+    kpiCard(t("k_renew"),d.renewals_30d,t("s_renew"),"var(--orange)",[0,1,1,1,2,2,d.renewals_30d],"▲ 2","warn")+
+    kpiCard(t("k_pending"),d.pending_replies,t("s_pending"),"var(--red)",[3,1,2,4,2,3,d.pending_replies],"▼ 1","up")+
+    kpiCard(t("k_ai"),d.ai_handled_pct+"%",t("s_ai"),"var(--green)",[20,25,28,40,36,45,d.ai_handled_pct],"▲ 8%","up",true)+
+    kpiCard(t("k_appts"),d.appts_7d,t("s_appts"),"var(--purple)",[0,1,1,2,1,2,d.appts_7d],"▲ 1","up")+
+    kpiCard(t("k_facts"),d.facts,t("s_facts"),"",[0,0,1,1,2,3,d.facts],"▲ 3","up");
+  const [rn,ib,ap,cs,ps]=await Promise.all([api("renewals"),api("inbox"),
+    api("appointments"),api("clients"),api("products")]);
+  const n=ib.filter(x=>x.status!=="sent").length;
+  $("#b-inbox").textContent=n||""; $("#b-inbox").style.display=n?"":"none";
+  const rn30=rn.filter(r=>r.days>=0&&r.days<=30).length;
+  $("#b-renew").textContent=rn30||""; $("#b-renew").style.display=rn30?"":"none";
+  const bm=$("#b-more"); if(bm){bm.textContent=rn30||"";bm.style.display=rn30?"":"none";}
+  const typeOf={}; ps.forEach(p=>typeOf[p.name]=p.type);
+  const agg={}; let total=0,count=0;
+  cs.forEach(c=>c.policies.forEach(pl=>{
+    const ty=typeOf[pl.product]||"其他";
+    const amt=parseInt((pl.premium||"").replace(/[^0-9]/g,""))||0;
+    agg[ty]=(agg[ty]||0)+amt; total+=amt; count++;}));
+  const COLS=["var(--hivora)","#7c3aed","#0e9f6e","#e8930c"];
+  const segs=Object.entries(agg).map(([k,v],i)=>({label:tyLabel(k),v,color:COLS[i%COLS.length]}));
+  $("#pf-body").innerHTML=donut(segs,total,count);
+  $("#tr-body").innerHTML=bigLine([20,25,28,40,36,45,d.ai_handled_pct],
+      ["8/4","8/5","8/6","8/7","8/8","8/9","8/10"])+
+    `<div class="tr-stats">
+      <div><b>${d.ai_handled_pct}%</b><span>${t("handled")}</span></div>
+      <div><b>4</b><span>${t("drafts")}</span></div>
+      <div><b>3</b><span>${t("actions")}</span></div></div>`;
+  const rows=[];
+  ib.filter(x=>x.status!=="sent").forEach(x=>rows.push({tm:x.ts,who:x.client,
+    ty:t("ty_msg"),detail:x.last,
+    chip:`<span class="pill warn">${t("wait_reply")}</span>`,ord:0}));
+  rn.filter(r=>r.days>=0&&r.days<=30).forEach(r=>rows.push({tm:r.renewal,who:r.client,
+    ty:t("ty_renewal"),detail:r.product+" · "+r.policy_no,
+    chip:`<span class="pill due">${t("d_later",r.days)}</span>`,ord:1+r.days}));
+  ap.filter(a=>a.days>=0&&a.days<=14).forEach(a=>rows.push({tm:a.date+" "+a.time,who:a.client,
+    ty:t("ty_appt"),detail:(a.purpose||"-")+(a.channel?" · "+a.channel:""),
+    chip:`<span class="pill blue">${a.days===0?t("today"):t("d_later",a.days)}</span>`,ord:1+a.days}));
+  rows.sort((a,b)=>a.ord-b.ord);
+  $("#dash-table").innerHTML=`<tr><th>${t("th_time")}</th><th>${t("th_client")}</th>
+    <th>${t("th_type")}</th><th>${t("th_detail")}</th><th>${t("th_status")}</th></tr>`
+    +rows.slice(0,9).map(r=>`<tr>
+      <td style="white-space:nowrap;font-variant-numeric:tabular-nums">${r.tm}</td>
+      <td><span class="who">${av(r.who)}<b>${r.who}</b></span></td>
+      <td><span class="tychip">${r.ty}</span></td>
+      <td style="color:var(--dim)">${r.detail}</td><td>${r.chip}</td></tr>`).join("");
+}
+
+/* ── 收件箱 ── */
+async function loadInbox(){
+  const ts=await api("inbox");
+  $("#inbox-list").innerHTML=ts.map(th=>`
+    <div class="titem ${curThread===th.id?"on":""}" onclick="openThread(${th.id})">
+      <b>${th.client}</b> ${th.unread?`<span class="badge">${th.unread}</span>`:""}
+      <div class="p">${th.last}</div>
+      <span class="pill ${th.status==="sent"?"ok":th.status==="drafted"?"blue":"warn"}">
+        ${{pending:t("st_pending"),drafted:t("st_drafted"),sent:t("st_sent")}[th.status]}</span>
+      <span style="font-size:10px;color:var(--dim);float:right">${th.ts}</span>
+    </div>`).join("");
+}
+async function openThread(id){
+  curThread=id; loadInbox();
+  const th=await api("inbox/"+id);
+  const human=th.mode==="human";
+  const suggHTML=(th.suggestions&&th.suggestions.length)?suggCards(th.suggestions):"";
+  const toolbar=human
+    ? `<div class="row" style="margin-bottom:8px;align-items:center">
+        <span class="pill due">${t("human_on")}</span>
+        <button class="btn ghost" style="padding:5px 10px;font-size:11px"
+          onclick="setMode(${id},'ai')">${t("back_ai")}</button></div>`
+    : `<div class="row" style="margin-bottom:8px">
+        <button class="btn" onclick="genSuggest(${id})">${t("suggest3")}</button>
+        <button class="btn ghost" onclick="setMode(${id},'human')">${t("to_human")}</button>
+       </div>${suggHTML}`;
+  $("#thread").innerHTML=`
+    <div class="thr-head">💬 ${th.client}
+      <span class="pill blue" style="margin-left:auto">${th.lang}</span>
+      ${human?`<span class="pill due">${t("human")}</span>`:''}</div>
+    <div class="thr-msgs">${th.messages.map(m=>
+      `<div class="m ${m.role}">${m.text}<div style="font-size:10px;opacity:.6;margin-top:3px">${m.ts}</div></div>`).join("")}</div>
+    <div class="thr-foot" id="thr-foot">
+      ${th.status==="sent"?`<div class="sub" style="margin:0 0 8px">${t("sent_note")}</div>`:toolbar}
+      <div class="row">
+        <textarea id="reply-text" placeholder="${human?t("reply_ph_human"):t("reply_ph")}"
+          style="flex:1;min-height:44px;resize:vertical"></textarea>
+        <button class="btn" onclick="sendReply(${id})">${t("send")}</button>
+      </div></div>`;
+  const box=$(".thr-msgs"); box.scrollTop=box.scrollHeight;
+}
+function suggCards(sugg){
+  const styles=t("sugg_styles");
+  return `<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px">`+
+    sugg.map((s,i)=>`<div class="draftbox" style="margin:0;cursor:pointer"
+      onclick="document.getElementById('reply-text').value=this.querySelector('.sg').textContent">
+      <div class="t">${styles[i]||(i+1)} · ${t("sugg_pick")}</div>
+      <div class="sg" style="font-size:12.5px;line-height:1.55;white-space:pre-wrap">${s}</div></div>`).join("")+`</div>`;
+}
+async function genSuggest(id){
+  $("#thr-foot").innerHTML=`<span class="thinking">${t("suggesting")}</span>`;
+  await post("inbox/"+id+"/suggest");
+  openThread(id);
+}
+async function setMode(id,mode){
+  await post("inbox/"+id+"/mode",{mode});
+  openThread(id);
+}
+async function sendReply(id){
+  const v=$("#reply-text").value.trim(); if(!v)return;
+  await post("inbox/"+id+"/send",{text:v});
+  openThread(id); loadDash();
+}
+
+/* ── 训练 ── */
+async function loadFacts(){
+  const f=await api("facts");
+  $("#facts").innerHTML=f.facts.map(x=>`<div class="fact">💡 ${x}</div>`).join("");
+}
+async function addFact(){
+  const v=$("#fact-in").value.trim(); if(!v)return;
+  await post("facts",{text:v}); $("#fact-in").value=""; loadFacts();
+}
+async function tryAsk(){
+  const v=$("#try-in").value.trim(); if(!v)return; $("#try-in").value="";
+  bubble("try-box","user",v);
+  const th=bubble("try-box","thinking",t("thinking"));
+  const j=await post("chat",{message:v}); th.remove();
+  bubble("try-box","bot",j.answer,j);
+}
+
+function bubble(boxId,cls,text,j){
+  const box=document.getElementById(boxId);
+  const d=document.createElement("div");
+  if(cls==="thinking"){d.className="thinking";d.textContent=text;}
+  else{d.className="m "+(cls==="user"?"agent":"customer");d.textContent=text;}
+  box.appendChild(d);
+  if(j){
+    const meta=document.createElement("div"); meta.className="meta-chips";
+    const names={policy:t("route_policy"),clientbook:t("route_clientbook"),
+                 drafting:t("route_drafting"),chat:t("route_chat"),
+                 action:t("route_action"),fallback:t("route_fallback")};
+    meta.innerHTML=`<span class="chip" style="color:var(--hivora)">▸ ${names[j.route]||j.route}</span>`
+      +(j.citations||[]).map(c=>`<span class="chip">📄 ${c.product}·P${c.page}</span>`).join("")
+      +(j.needs_human?`<span class="chip" style="color:var(--red)">${t("to_human_chip")}</span>`:"");
+    box.appendChild(meta);
+  }
+  box.scrollTop=box.scrollHeight; return d;
+}
+$("#try-in").addEventListener("keydown",e=>{if(e.key==="Enter")tryAsk()});
+$("#fact-in").addEventListener("keydown",e=>{if(e.key==="Enter")addFact()});
+
+/* ── 客户 ── */
+async function loadClients(){
+  const cs=await api("clients");
+  lastClients=cs;
+  $("#client-cards").innerHTML=cs.map((c,i)=>`
+    <div class="panel">
+      <h3>👤 ${c.name} <span style="font-weight:400;font-size:12px;color:var(--dim)">${c.phone}</span>
+        <span style="float:right;display:flex;gap:6px">
+          <button class="btn ghost" style="padding:5px 10px;font-size:11px"
+            onclick="editClient(${i})">✎ ${t("edit")}</button>
+          <button class="btn ghost" style="padding:5px 10px;font-size:11px"
+            onclick="analyzeOpp('${c.name.replace(/'/g,"\\'")}',${i})">${t("opp_btn")}</button>
+        </span></h3>
+      ${c.policies.length?`<table><tr><th>${t("th_product")}</th><th>${t("th_no")}</th><th>${t("th_premium")}</th><th>${t("th_renewal")}</th><th>${t("th_status")}</th><th></th></tr>
+        ${c.policies.map((p,j)=>`<tr><td>${p.product}</td><td>${p.policy_no}</td>
+          <td>${p.premium}</td><td>${p.renewal}</td>
+          <td><span class="pill ${p.days<0?"due":p.days<=30?"warn":"ok"}">
+          ${p.days<0?t("expired"):p.days<=30?t("d_later",p.days):t("valid")}</span></td>
+          <td><button class="icobtn" onclick="editPolicy(${i},${j})" aria-label="edit">✎</button></td></tr>`).join("")}
+        </table>`:`<span class="sub">${t("no_policy")}</span>`}
+      <div class="sub" style="margin:8px 0 0">📝 ${c.notes}</div>
+      <div id="opp-${i}"></div>
+    </div>`).join("");
+}
+let lastClients=[];
+function editClient(i){const c=lastClients[i];
+  openModal("editClient",{orig:c.name,name:c.name,phone:c.phone,notes:c.notes});}
+function editPolicy(i,j){const c=lastClients[i],p=c.policies[j];
+  openModal("editPolicy",{client:c.name,orig_no:p.policy_no,product:p.product,
+    policy_no:p.policy_no,premium:p.premium,renewal:p.renewal});}
+async function analyzeOpp(name,i){
+  const box=document.getElementById("opp-"+i);
+  box.innerHTML=`<div class="thinking" style="margin-top:8px">${t("analyzing")}</div>`;
+  const r=await post("opportunity",{client:name});
+  box.innerHTML=`<div class="draftbox" style="margin-top:10px"><div class="t">${t("opp_cap")}</div>
+    <div style="font-size:12.5px;white-space:pre-wrap;line-height:1.6">${r.analysis}</div></div>`;
+}
+
+/* ── 产品目录 ── */
+async function loadProducts(){
+  const ps=await api("products");
+  $("#prod-cards").innerHTML=ps.map(p=>`
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <b style="font-size:15px">${p.name}</b><span class="pill blue">${p.type}</span></div>
+      <div class="s" style="margin:2px 0 8px">${p.insurer}</div>
+      <div style="font-size:14px;font-weight:700;color:var(--hivora);margin-bottom:8px">${p.price}</div>
+      ${p.highlights.map(h=>`<div style="font-size:12px;padding:3px 0;color:var(--text)">· ${h}</div>`).join("")}
+    </div>`).join("");
+}
+
+/* ── 预约 ── */
+async function loadAppts(){
+  const [as,d]=await Promise.all([api("appointments"),api("dashboard")]);
+  /* 月历视图：动态当月 */
+  const [Yr,Mo,Dy]=d.today.split("-").map(Number);
+  const wd=LANG==="zh"?["一","二","三","四","五","六","日"]:["Mo","Tu","We","Th","Fr","Sa","Su"];
+  const MN=["January","February","March","April","May","June","July","August",
+            "September","October","November","December"];
+  $("#cal-month").textContent=LANG==="zh"?`${Yr} 年 ${Mo} 月`:`${MN[Mo-1]} ${Yr}`;
+  $("#cal-head").innerHTML=wd.map(w=>`<div>${w}</div>`).join("");
+  const pref=`${Yr}-${String(Mo).padStart(2,"0")}`;
+  const byDay={};
+  as.forEach(a=>{if(a.date&&a.date.startsWith(pref)){
+    const dd=+a.date.slice(8,10);(byDay[dd]=byDay[dd]||[]).push(a);}});
+  const off=(new Date(Yr,Mo-1,1).getDay()+6)%7;
+  const dim=new Date(Yr,Mo,0).getDate();
+  let cells="";
+  for(let b=0;b<off;b++)cells+=`<div class="cal-d out"></div>`;
+  for(let day=1;day<=dim;day++){
+    const evs=(byDay[day]||[]).map(a=>
+      `<div class="cal-ev" title="${a.time} ${a.client} · ${a.purpose||""}">${a.time} ${a.client.split(" ")[0]}</div>`).join("");
+    cells+=`<div class="cal-d${day===Dy?" today":""}"><span class="cal-n">${day}</span>${evs}</div>`;
+  }
+  $("#cal-grid").innerHTML=cells;
+  $("#appt-table").innerHTML=`<tr><th>${t("th_date")}</th><th>${t("th_time")}</th><th>${t("th_client")}</th><th>${t("th_purpose")}</th><th>${t("th_channel")}</th><th></th></tr>`
+    +as.map(a=>`<tr><td><b>${a.date}</b></td><td>${a.time}</td><td>${a.client}</td>
+     <td>${a.purpose}</td><td>${a.channel}</td>
+     <td><span class="pill ${a.days<0?"due":a.days<=2?"warn":"ok"}">
+       ${a.days<0?t("past"):a.days===0?t("today"):t("d_later",a.days)}</span></td></tr>`).join("");
+}
+/* ── 新增弹窗（右上角 ＋ 按钮触发）── */
+const MODALS={
+  editClient:{title:"m_editc",fields:[
+    {id:"orig",type:"hidden"},
+    {id:"name",label:"f_name"},
+    {id:"phone",label:"f_phone"},
+    {id:"notes",label:"f_notes"}],
+    required:["name"],
+    save:async v=>{await post("clients/update",v);loadClients();loadDash();}},
+  editPolicy:{title:"m_editp",fields:[
+    {id:"client",type:"hidden"},{id:"orig_no",type:"hidden"},
+    {id:"product",label:"f_product"},
+    {id:"policy_no",label:"f_pno"},
+    {id:"premium",label:"f_premium"},
+    {id:"renewal",label:"f_renewal",type:"date"}],
+    required:["product"],
+    save:async v=>{await post("policies/update",v);loadClients();loadDash();}},
+  client:{title:"m_client",fields:[
+    {id:"name",label:"f_name",ph:"e.g. Ahmad Faiz"},
+    {id:"phone",label:"f_phone",ph:"012-345 6789"},
+    {id:"notes",label:"f_notes",ph:""}],
+    required:["name"],
+    save:async v=>{await post("clients",v);loadClients();loadDash();}},
+  policy:{title:"m_policy",fields:[
+    {id:"client",label:"f_client",ph:""},
+    {id:"product",label:"f_product",ph:"e.g. CarePlus 360"},
+    {id:"policy_no",label:"f_pno",ph:"CP3-…"},
+    {id:"premium",label:"f_premium",ph:"RM 320"},
+    {id:"renewal",label:"f_renewal",type:"date"}],
+    required:["client","product"],
+    save:async v=>{const r=await post("policies",v);
+      if(!r.ok)throw r.msg; loadClients();loadDash();}},
+  product:{title:"m_product",fields:[
+    {id:"name",label:"f_pname",ph:"e.g. SafeDrive Motor"},
+    {id:"type",label:"f_type",ph:""},
+    {id:"price",label:"f_price",ph:"RM 200 – 400"},
+    {id:"highlights",label:"f_high",ph:"A, B, C"}],
+    required:["name"],
+    save:async v=>{await post("products",v);loadProducts();}},
+  appt:{title:"m_appt",fields:[
+    {id:"client",label:"f_who",ph:""},
+    {id:"date",label:"f_date",type:"date"},
+    {id:"time",label:"f_time",type:"time"},
+    {id:"purpose",label:"f_purpose",ph:""},
+    {id:"channel",label:"f_channel",ph:""}],
+    required:["client","date"],
+    save:async v=>{v.time=v.time||"10:00";await post("appointments",v);loadAppts();loadDash();}},
+};
+let curModal=null;
+function openModal(kind,preset={}){
+  curModal=kind; const m=MODALS[kind];
+  $("#modal-title").textContent=t(m.title);
+  $("#modal-err").textContent="";
+  $("#modal-body").innerHTML=m.fields.map(f=>f.type==="hidden"
+    ?`<input type="hidden" id="m-${f.id}">`
+    :`<div class="mfield"><label for="m-${f.id}">${t(f.label)}</label>
+    <input id="m-${f.id}" type="${f.type||"text"}" placeholder="${f.ph||""}"></div>`).join("");
+  m.fields.forEach(f=>{if(preset[f.id]!==undefined)$("#m-"+f.id).value=preset[f.id];});
+  $("#modal").classList.remove("hide");
+  const ff=m.fields.find(f=>f.type!=="hidden");
+  if(ff)$("#m-"+ff.id).focus();
+}
+function closeModal(){$("#modal").classList.add("hide");curModal=null;}
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&curModal)closeModal();});
+$("#modal-save").onclick=async()=>{
+  const m=MODALS[curModal]; if(!m)return;
+  const v={}; m.fields.forEach(f=>v[f.id]=$("#m-"+f.id).value.trim());
+  const missing=m.required.find(r=>!v[r]);
+  if(missing){$("#modal-err").textContent=t("need_required");
+    $("#m-"+missing).focus();return;}
+  $("#modal-save").disabled=true;
+  try{await m.save(v);closeModal();}
+  catch(err){$("#modal-err").textContent=typeof err==="string"?err:t("save_fail");}
+  finally{$("#modal-save").disabled=false;}
+};
+
+/* ── 续保 ── */
+async function loadRenewals(){
+  const rs=await api("renewals");
+  $("#renew-table").innerHTML=`<tr><th>${t("th_client")}</th><th>${t("th_product")}</th><th>${t("th_no")}</th>
+    <th>${t("th_premium")}</th><th>${t("th_renewal")}</th><th>${t("th_urgency")}</th></tr>`+rs.map(r=>
+    `<tr><td><b>${r.client}</b><br><span class="sub">${r.phone}</span></td>
+     <td>${r.product}</td><td>${r.policy_no}</td><td>${r.premium}</td>
+     <td>${r.renewal}</td>
+     <td><span class="pill ${r.days<0?"due":r.days<=30?"warn":"ok"}">
+       ${r.days<0?t("expired_n",-r.days):r.days<=30?t("d_later",r.days)+" ⚠️":t("d_later",r.days)}</span></td></tr>`).join("");
+}
+
+/* ── 客户视角（WhatsApp 手机）── */
+let custPoll=null;
+async function openCustomer(){
+  const ts=await api("inbox");
+  $("#cust-sel").innerHTML=ts.map(t=>`<option value="${t.id}">${t.client}</option>`).join("");
+  $("#cust-overlay").classList.remove("hide");
+  loadCustomer();
+  custPoll=setInterval(loadCustomer,3000);   // 轮询：代理人发了新回复就出现
+}
+function closeCustomer(){
+  $("#cust-overlay").classList.add("hide");
+  clearInterval(custPoll); loadDash();
+}
+async function loadCustomer(){
+  const id=$("#cust-sel").value; if(!id)return;
+  const t=await api("inbox/"+id);
+  $("#cust-msgs").innerHTML=t.messages.map(m=>{
+    const me=m.role==="customer";   // 客户视角：自己在右边（绿泡）
+    return `<div style="align-self:${me?"flex-end":"flex-start"};max-width:75%;
+      background:${me?"#d9fdd3":"#fff"};padding:7px 11px;border-radius:10px;
+      font-size:13px;line-height:1.5;white-space:pre-wrap;
+      box-shadow:0 1px 1px rgba(0,0,0,.08)">${m.text}
+      <div style="font-size:10px;color:#8696a0;text-align:right;margin-top:2px">${m.ts}</div></div>`;
+  }).join("");
+  const box=$("#cust-msgs"); box.scrollTop=box.scrollHeight;
+}
+async function custSend(){
+  const v=$("#cust-in").value.trim(); if(!v)return; $("#cust-in").value="";
+  await post("inbox/"+$("#cust-sel").value+"/customer",{text:v});
+  loadCustomer();
+}
+$("#cust-in").addEventListener("keydown",e=>{if(e.key==="Enter")custSend()});
+
+applyLang();
+</script>
+</body>
+</html>
