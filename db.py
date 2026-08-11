@@ -199,6 +199,10 @@ class Agent(Base):
     name = Column(String(200), default="")
     pw_hash = Column(String(200))
     salt = Column(String(64))
+    role = Column(String(16), default="agent")      # admin / agent
+    active = Column(Integer, default=1)
+    plan = Column(String(32), default="trial")
+    expires = Column(String(10), default="")        # YYYY-MM-DD，空=不限
 
 
 class Document(Base):
@@ -225,3 +229,30 @@ class Chunk(Base):
 
 def ensure_schema():
     Base.metadata.create_all(engine)
+
+
+class InviteCode(Base):
+    __tablename__ = "invite_codes"
+    id = Column(Integer, primary_key=True)
+    code = Column(String(32), unique=True, index=True)
+    created_by = Column(String(64), default="")
+    used_by = Column(String(200), default="")     # email
+    created = Column(String(24), default="")
+    used = Column(String(24), default="")
+
+
+def migrate_columns():
+    """轻量迁移：给已存在的 agents 表补新列（SQLite/Postgres 通用）。"""
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        for ddl in [
+            "ALTER TABLE agents ADD COLUMN role VARCHAR(16) DEFAULT 'agent'",
+            "ALTER TABLE agents ADD COLUMN active INTEGER DEFAULT 1",
+            "ALTER TABLE agents ADD COLUMN plan VARCHAR(32) DEFAULT 'trial'",
+            "ALTER TABLE agents ADD COLUMN expires VARCHAR(10) DEFAULT ''",
+        ]:
+            try:
+                conn.execute(text(ddl))
+                conn.commit()
+            except Exception:
+                conn.rollback()

@@ -36,25 +36,66 @@ def current_agent(authorization: str = Header(default="")) -> str:
     return key
 
 
-def register(s, email: str, password: str, name: str) -> dict:
+def register(s, email: str, password: str, name: str, code: str = "") -> dict:
     email = email.strip().lower()
     if not email or len(password) < 6:
         raise HTTPException(400, "邮箱必填，密码至少 6 位")
     if s.query(db.Agent).filter_by(email=email).first():
         raise HTTPException(400, "该邮箱已注册")
+    import datetime as _dt
+    inv = s.query(db.InviteCode).filter_by(code=code.strip().upper(), used_by="").first()
+    if not inv:
+        raise HTTPException(403, "需要有效的邀请码（请联系管理员购买获取）")
     salt = secrets.token_hex(16)
     key = "ag_" + secrets.token_hex(8)
     s.add(db.Agent(agent_key=key, email=email, name=name or email.split("@")[0],
                    pw_hash=hash_pw(password, salt), salt=salt))
+    inv.used_by = email
+    inv.used = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     s.commit()
-    return dict(token=make_token(key), name=name or email.split("@")[0])
+    return dict(token=make_token(key), name=name or email.split("@")[0], role="agent")
 
 
 def login(s, email: str, password: str) -> dict:
+    import datetime as _dt
     a = s.query(db.Agent).filter_by(email=email.strip().lower()).first()
     if not a or a.pw_hash != hash_pw(password, a.salt):
         raise HTTPException(401, "邮箱或密码不对")
-    return dict(token=make_token(a.agent_key), name=a.name)
+    if not getattr(a, "active", 1):
+        raise HTTPException(403, "账号已停用，请联系管理员")
+    if getattr(a, "expires", "") and a.expires < _dt.date.today().isoformat():
+        raise HTTPException(403, f"账号已于 {a.expires} 到期，请联系管理员续费")
+    return dict(token=make_token(a.agent_key), name=a.name,
+                role=getattr(a, "role", "agent"))
+
+
+def current_admin(authorization: str = Header(default="")) -> str:
+    key = current_agent(authorization)
+    s = db.SessionLocal()
+    try:
+        a = s.query(db.Agent).filter_by(agent_key=key).first()
+        if not a or getattr(a, "role", "agent") != "admin":
+            raise HTTPException(403, "需要管理员权限")
+        return key
+    finally:
+        s.close()
+
+
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@hivora.my")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "Hivora-Admin-2026")
+
+
+def ensure_admin():
+    s = db.SessionLocal()
+    try:
+        if not s.query(db.Agent).filter_by(email=ADMIN_EMAIL).first():
+            salt = secrets.token_hex(16)
+            s.add(db.Agent(agent_key="agent_admin", email=ADMIN_EMAIL, name="Admin (XT)",
+                           pw_hash=hash_pw(ADMIN_PASSWORD, salt), salt=salt,
+                           role="admin", plan="owner"))
+            s.commit()
+    finally:
+        s.close()
 
 
 def ensure_demo_agent():

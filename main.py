@@ -20,8 +20,10 @@ app = FastAPI(title="Hivora Insurance Agent")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
                    allow_headers=["*"])
 db.ensure_schema()
+db.migrate_columns()
 db.seed_if_empty()
 auth.ensure_demo_agent()
+auth.ensure_admin()
 AID = Depends(auth.current_agent)
 
 
@@ -448,13 +450,14 @@ class AuthReq(BaseModel):
     email: str
     password: str
     name: str = ""
+    code: str = ""
 
 
 @app.post("/api/auth/register")
 def api_register(req: AuthReq):
     s = SessionLocal()
     try:
-        return auth.register(s, req.email, req.password, req.name)
+        return auth.register(s, req.email, req.password, req.name, req.code)
     finally:
         s.close()
 
@@ -520,5 +523,68 @@ async def upload_document(file: UploadFile = File(...), insurer: str = Form(""),
         db.audit(s, "upload_doc", f"{file.filename}:{n}chunks")
         s.commit()
         return dict(ok=True, chunks=n, pages=len(pages))
+    finally:
+        s.close()
+
+
+# ── 管理后台（仅 admin）──────────────────────────────────────
+import secrets as _secrets
+
+ADM = Depends(auth.current_admin)
+
+
+@app.get("/api/admin/agents")
+def admin_agents(_: str = ADM):
+    s = SessionLocal()
+    try:
+        return [dict(id=a.id, email=a.email, name=a.name, role=a.role,
+                     active=bool(a.active), plan=a.plan, expires=a.expires or "")
+                for a in s.query(db.Agent).all()]
+    finally:
+        s.close()
+
+
+@app.get("/api/admin/invites")
+def admin_invites(_: str = ADM):
+    s = SessionLocal()
+    try:
+        return [dict(code=i.code, used_by=i.used_by, created=i.created, used=i.used)
+                for i in s.query(db.InviteCode).order_by(db.InviteCode.id.desc()).limit(30)]
+    finally:
+        s.close()
+
+
+@app.post("/api/admin/invites")
+def admin_make_invite(adm: str = ADM):
+    import datetime as _dt
+    s = SessionLocal()
+    try:
+        code = "HIV-" + _secrets.token_hex(3).upper()
+        s.add(db.InviteCode(code=code, created_by=adm,
+                            created=_dt.datetime.now().strftime("%Y-%m-%d %H:%M")))
+        db.audit(s, "make_invite", code)
+        s.commit()
+        return dict(code=code)
+    finally:
+        s.close()
+
+
+class ToggleReq(BaseModel):
+    active: bool
+
+
+@app.post("/api/admin/agents/{agent_id}/toggle")
+def admin_toggle(agent_id: int, req: ToggleReq, _: str = ADM):
+    s = SessionLocal()
+    try:
+        a = s.query(db.Agent).filter_by(id=agent_id).first()
+        if not a:
+            raise HTTPException(404)
+        if a.role == "admin":
+            raise HTTPException(400, "不能停用管理员")
+        a.active = 1 if req.active else 0
+        db.audit(s, "toggle_agent", f"{a.email}:{a.active}")
+        s.commit()
+        return dict(ok=True, active=bool(a.active))
     finally:
         s.close()
