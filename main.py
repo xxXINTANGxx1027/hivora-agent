@@ -122,10 +122,15 @@ def index():
     return FileResponse(BASE_DIR / "static" / "index.html")
 
 
+# Render 会注入 RENDER_GIT_COMMIT；本地跑就是空。用来确认线上到底是哪一版。
+BUILD = (os.environ.get("RENDER_GIT_COMMIT")
+         or os.environ.get("HIVORA_BUILD", ""))[:12]
+
+
 @app.get("/healthz")
 def healthz():
     """存活探针 —— 只说明进程还在。"""
-    return {"ok": True, "model": MODEL, "version": VERSION}
+    return {"ok": True, "model": MODEL, "version": VERSION, "build": BUILD}
 
 
 @app.get("/readyz")

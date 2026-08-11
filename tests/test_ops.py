@@ -284,3 +284,43 @@ def test_backup_script_and_runbook_exist():
     runbook = (ROOT / "RUNBOOK.md").read_text(encoding="utf-8")
     for topic in ("readyz", "回滚", "恢复", "CORS", "PDPA"):
         assert topic in runbook, f"RUNBOOK 没写 {topic}"
+
+
+# ── 部署工具链 ────────────────────────────────────────────────
+def test_build_fingerprint_is_stable_and_api_independent():
+    """指纹必须跟填哪个后端地址无关，否则没法拿本地的去比对线上的。"""
+    import subprocess
+    src = ROOT / "server" / "static" / "index.html"
+    run = lambda *a: subprocess.run(["python3", str(ROOT / "stamp.py"), str(src), *a],
+                                    capture_output=True, text=True, check=True).stdout
+
+    want = run("--build-id").strip()
+    assert len(want) == 12
+
+    import re
+    for api in ("", "https://a.example.com", "https://b.example.com"):
+        got = re.search(r'hivora-build" content="([^"]*)"', run(api)).group(1)
+        assert got == want, f"换了 API_BASE 指纹就变了：{api}"
+
+
+def test_deployed_frontend_can_be_verified():
+    """frontend/index.html 里的指纹要跟源文件算出来的一致 —— push.sh 靠这个验部署。"""
+    import re
+    import subprocess
+    want = subprocess.run(
+        ["python3", str(ROOT / "stamp.py"),
+         str(ROOT / "server" / "static" / "index.html"), "--build-id"],
+        capture_output=True, text=True, check=True).stdout.strip()
+    dest = (ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
+    got = re.search(r'hivora-build" content="([^"]*)"', dest).group(1)
+    assert got == want, "frontend 没同步，跑 ./sync-frontend.sh"
+
+
+def test_push_script_exists_and_is_runnable():
+    p = ROOT / "push.sh"
+    assert p.exists() and p.stat().st_mode & 0o111, "push.sh 不存在或没有执行权限"
+    body = p.read_text(encoding="utf-8")
+    assert "--status" in body
+    assert "sync-frontend.sh" in body and "--check" in body, "push.sh 应该校验前端同步"
+    assert "pytest" in body, "push.sh 应该在推之前跑测试"
+    assert "read -r -p" in body, "推生产之前应该要确认一次"
