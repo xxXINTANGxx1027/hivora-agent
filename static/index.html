@@ -121,6 +121,7 @@
   .thinking::after{content:"…";animation:d 1.2s infinite}
   @keyframes d{0%{content:"·"}33%{content:"··"}66%{content:"···"}}
   .hide{display:none}
+  #trash-overlay:not(.hide){display:flex}
   #cust-overlay:not(.hide){display:flex}
   /* 页头：标题 + 右上角动作按钮 */
   .page-head{display:flex;justify-content:space-between;align-items:flex-start;
@@ -529,7 +530,7 @@
 
 <!-- 新增弹窗 -->
 <div id="trash-overlay" class="hide" onclick="if(event.target===this)closeTrash()"
-  style="position:fixed;inset:0;background:#111a;z-index:60;display:flex;
+  style="position:fixed;inset:0;background:#111a;z-index:60;
          align-items:center;justify-content:center;padding:20px">
   <div style="background:var(--panel);border-radius:14px;max-width:560px;width:100%;
               max-height:78vh;display:flex;flex-direction:column;overflow:hidden">
