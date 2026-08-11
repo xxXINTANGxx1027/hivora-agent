@@ -31,6 +31,7 @@
              color:var(--text);cursor:pointer;text-align:left}
   nav button:hover{background:var(--hivora-light)}
   nav button.on{background:var(--hivora-light);color:var(--hivora-dark);font-weight:600}
+  .badge:empty{display:none}   /* 没数字就别显示，否则是个空红条 */
   .badge{margin-left:auto;background:var(--red);color:#fff;font-size:10px;
          border-radius:99px;padding:1px 7px}
   .foot{margin-top:auto;font-size:10px;color:var(--dim);padding:8px}
@@ -707,9 +708,10 @@ function applyLang(){
     "#v-train .col-scroll .sub":"train_hint",
     "#pf-title":"p_portfolio","#tr-title":"p_trend","#ac-title":"p_activity"};
   for(const[sel,key]of Object.entries(S)){const el=$(sel);if(el)el.textContent=t(key);}
-  document.querySelectorAll(".sec")[0].textContent=t("nav_biz");
-  document.querySelectorAll(".sec")[1].textContent=t("nav_ai");
-  document.querySelectorAll(".sec")[2].textContent=t("nav_work");
+  /* 按下标取 .sec 会误伤 ADMIN 那一行——管理员登录时它排第 3 个，
+     结果 ADMIN 被覆盖成「展业」，侧栏出现两个「展业」。改成跳过它。 */
+  const secs=[...document.querySelectorAll(".sec")].filter(el=>el.id!=="sec-admin");
+  ["nav_biz","nav_ai","nav_work"].forEach((k,i)=>{if(secs[i])secs[i].textContent=t(k);});
   $("#cust-lbl").textContent=t("cust_view");
   $("#fact-in").placeholder=t("teach_ph");
   $("#try-in").placeholder=t("ask_ph");
