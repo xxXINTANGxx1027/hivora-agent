@@ -99,7 +99,8 @@ def test_client_can_add_and_delete_a_client(live_server, page, agent_factory):
 
     page.click("#trash-btn")
     page.wait_for_selector("#trash-overlay:not(.hide)", timeout=10000)
-    assert page.locator("#trash-body").inner_text().find("浏览器测试客户") >= 0
+    # 浮层先显示、数据后到，要等内容真的渲染出来
+    page.wait_for_selector("#trash-body >> text=浏览器测试客户", timeout=10000)
     _assert_no_js_errors(page)
 
 

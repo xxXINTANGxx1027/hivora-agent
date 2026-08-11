@@ -32,3 +32,14 @@ services:
       # 登录有效期（天）
       - key: TOKEN_TTL_DAYS
         value: "14"
+      # 错误监控：填了 DSN 才启用，不填完全不引入
+      - key: SENTRY_DSN
+        sync: false
+      # 每账号每月 token 上限（管理站可按账号覆盖）
+      - key: MONTHLY_TOKEN_QUOTA
+        value: "2000000"
+      # 成本估算单价（美元/百万 token），换模型记得改
+      - key: PRICE_PER_MTOK_IN
+        value: "0.28"
+      - key: PRICE_PER_MTOK_OUT
+        value: "0.42"

@@ -94,34 +94,48 @@ def current_admin(authorization: str = Header(default="")) -> str:
     return a["key"]
 
 
-# ── 登录限流（进程内，够用于当前单实例规模）────────────────────
-_FAILS: dict[str, tuple[int, float]] = {}
-_LOCK_AFTER, _LOCK_SECS = 5, 300
+# ── 登录限流 ──────────────────────────────────────────────────
+# 计数落库而不是放进程内存：扩到第二个实例时，进程内的字典各算各的，
+# 攻击者轮着打就绕过去了。
+_LOCK_AFTER = int(os.environ.get("LOGIN_LOCK_AFTER", "5"))
+_LOCK_SECS = int(os.environ.get("LOGIN_LOCK_SECONDS", "300"))
 
 
-def _check_lock(email: str):
-    n, until = _FAILS.get(email, (0, 0.0))
-    if n >= _LOCK_AFTER and time.time() < until:
-        raise HTTPException(429, f"登录失败次数过多，请 {int(until - time.time())} 秒后再试")
+def _check_lock(s, email: str):
+    row = s.query(db.LoginLock).filter_by(email=email).first()
+    if row and (row.fails or 0) >= _LOCK_AFTER and time.time() < (row.until or 0):
+        raise HTTPException(429, f"登录失败次数过多，请 {int(row.until - time.time())} 秒后再试")
 
 
-def _note_fail(email: str):
-    n, _ = _FAILS.get(email, (0, 0.0))
-    _FAILS[email] = (n + 1, time.time() + _LOCK_SECS)
+def _note_fail(s, email: str):
+    row = s.query(db.LoginLock).filter_by(email=email).first()
+    if row is None:
+        row = db.LoginLock(email=email, fails=0)
+        s.add(row)
+    # 锁已过期就从头计数，避免一次手滑永久拉黑
+    if (row.until or 0) < time.time():
+        row.fails = 0
+    row.fails = (row.fails or 0) + 1
+    row.until = time.time() + _LOCK_SECS
+    s.commit()
+
+
+def _clear_lock(s, email: str):
+    s.query(db.LoginLock).filter_by(email=email).delete()
 
 
 def login(s, email: str, password: str) -> dict:
     email = email.strip().lower()
-    _check_lock(email)
+    _check_lock(s, email)
     a = s.query(db.Agent).filter_by(email=email).first()
     if not a or not hmac.compare_digest(a.pw_hash, hash_pw(password, a.salt)):
-        _note_fail(email)
+        _note_fail(s, email)
         raise HTTPException(401, "邮箱或密码不对")
     if not (1 if a.active is None else a.active):
         raise HTTPException(403, "账号已停用，请联系管理员")
     if a.expires and a.expires < dt.date.today().isoformat():
         raise HTTPException(403, f"账号已于 {a.expires} 到期，请联系管理员续费")
-    _FAILS.pop(email, None)
+    _clear_lock(s, email)
     db.audit(s, a.agent_key, "login", email)
     s.commit()
     return dict(token=make_token(a.agent_key), name=a.name, role=a.role or "agent")

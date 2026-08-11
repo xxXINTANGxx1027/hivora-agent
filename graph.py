@@ -36,7 +36,8 @@ if os.environ.get("OPENROUTER_API_KEY"):
     llm = ChatOpenAI(model=MODEL, temperature=0.2,
                      base_url="https://openrouter.ai/api/v1",
                      api_key=os.environ["OPENROUTER_API_KEY"],
-                     timeout=LLM_TIMEOUT, max_retries=LLM_RETRIES)
+                     timeout=LLM_TIMEOUT, max_retries=LLM_RETRIES,
+                     stream_usage=True)   # 流式也要拿得到 token 数，否则记账有缺口
 else:
     from langchain_ollama import ChatOllama
     MODEL = "qwen2.5:7b"
@@ -53,24 +54,54 @@ class LLMUnavailable(RuntimeError):
     """模型调用失败或排队超时。对外只暴露友好文案，细节进日志。"""
 
 
-def llm_text(prompt: str) -> str:
+class QuotaExceeded(RuntimeError):
+    """账号本月 token 用超了。"""
+
+
+def _check_quota(agent_id: str):
+    if not agent_id:
+        return
+    limit = db.quota_for(agent_id)
+    if limit < 0:
+        return
+    used = db.month_tokens(agent_id)
+    if used >= limit:
+        raise QuotaExceeded(
+            f"本月 AI 用量已达上限（{used:,}/{limit:,} tokens），请联系管理员提额")
+
+
+def _account(agent_id: str, msg):
+    """从模型响应里取真实 token 数记账。拿不到就不记，绝不猜。"""
+    u = getattr(msg, "usage_metadata", None) or {}
+    inp, out = int(u.get("input_tokens") or 0), int(u.get("output_tokens") or 0)
+    if inp or out:
+        db.record_usage(agent_id, MODEL, inp, out)
+
+
+def llm_text(prompt: str, agent_id: str = "") -> str:
+    _check_quota(agent_id)
     if not _slots.acquire(timeout=LLM_TIMEOUT):
         raise LLMUnavailable("AI 正忙，请稍后再试")
     try:
-        return llm.invoke(prompt).content
+        msg = llm.invoke(prompt)
     except Exception as e:
         log.warning("llm.invoke 失败: %s", e)
         raise LLMUnavailable("AI 服务暂时不可用，请稍后再试") from e
     finally:
         _slots.release()
+    _account(agent_id, msg)
+    return msg.content
 
 
-def llm_tokens(prompt: str):
+def llm_tokens(prompt: str, agent_id: str = ""):
     """流式产出 token。失败时抛 LLMUnavailable。"""
+    _check_quota(agent_id)
     if not _slots.acquire(timeout=LLM_TIMEOUT):
         raise LLMUnavailable("AI 正忙，请稍后再试")
+    final = None
     try:
         for chunk in llm.stream(prompt):
+            final = chunk if final is None else final + chunk
             text = getattr(chunk, "content", "") or ""
             if text:
                 yield text
@@ -79,6 +110,8 @@ def llm_tokens(prompt: str):
         raise LLMUnavailable("AI 服务暂时不可用，请稍后再试") from e
     finally:
         _slots.release()
+        if final is not None:
+            _account(agent_id, final)
 
 
 class AgentState(TypedDict):
@@ -110,7 +143,7 @@ ROUTES = ("policy", "clientbook", "drafting", "action", "chat", "fallback")
 STREAMABLE = ("policy", "clientbook", "drafting", "chat")   # 其余是动作/固定文案
 
 
-def route_of(question: str) -> str:
+def route_of(question: str, agent_id: str = "") -> str:
     q = question.lower()
     for route, kws in FASTPATH.items():
         if any(kw in q for kw in kws):
@@ -120,14 +153,14 @@ def route_of(question: str) -> str:
               "｜action=要求新增/记录数据｜chat=问候闲聊｜fallback=超范围\n"
               f"用户消息：{q}\n只输出一个词。")
     try:
-        r = llm_text(prompt).strip().lower()
+        r = llm_text(prompt, agent_id).strip().lower()
     except LLMUnavailable:
         return "chat"       # 路由挂了退回闲聊，后续节点会给出友好报错
     return r if r in ROUTES else "fallback"
 
 
 def supervisor(state):
-    return {"route": route_of(_q(state))}
+    return {"route": route_of(_q(state), state["agent_id"])}
 
 
 # ── 提示词构造（流式和非流式共用同一套，避免两条路径漂移）──────
@@ -196,8 +229,8 @@ def _llm_node(state, builder):
     if prompt is None:
         return {"messages": [("assistant", fixed)], "citations": cites}
     try:
-        ans = llm_text(prompt)
-    except LLMUnavailable as e:
+        ans = llm_text(prompt, state["agent_id"])
+    except (LLMUnavailable, QuotaExceeded) as e:
         return {"messages": [("assistant", str(e))], "citations": []}
     return {"messages": [("assistant", ans)], "citations": cites}
 
@@ -267,8 +300,8 @@ def action_node(state):
     prompt = ACTION_PROMPT.format(today=td.isoformat(),
                                   wd="一二三四五六日"[td.weekday()], q=_q(state))
     try:
-        raw = llm_text(prompt).strip()
-    except LLMUnavailable as e:
+        raw = llm_text(prompt, state["agent_id"]).strip()
+    except (LLMUnavailable, QuotaExceeded) as e:
         return {"messages": [("assistant", str(e))], "citations": []}
     raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
 
@@ -381,7 +414,7 @@ def ask_stream(question: str, agent_id: str):
     state = {"messages": [("user", question)], "agent_id": agent_id,
              "route": "", "citations": [], "needs_human": False}
     try:
-        route = route_of(question)
+        route = route_of(question, agent_id)
     except Exception:
         log.exception("路由失败")
         yield {"type": "error", "message": "AI 服务暂时不可用，请稍后再试"}
@@ -411,10 +444,10 @@ def ask_stream(question: str, agent_id: str):
         yield {"type": "token", "text": fixed}
     else:
         try:
-            for tok in llm_tokens(prompt):
+            for tok in llm_tokens(prompt, agent_id):
                 parts.append(tok)
                 yield {"type": "token", "text": tok}
-        except LLMUnavailable as e:
+        except (LLMUnavailable, QuotaExceeded) as e:
             yield {"type": "error", "message": str(e)}
             return
 

@@ -35,8 +35,12 @@ Python + FastAPI + LangGraph + SQLAlchemy 后端，单文件 HTML SPA 前端。
 9. **软删**：clients/policies/appointments/facts/documents 都有 `deleted` 列。
    任何面向用户的读取都要包 `db.live(query, Model)`，否则删掉的数据会漏回来。
    彻底删除只走 `/api/admin/clients/{id}/purge`（PDPA 被遗忘权）。
-10. **LLM 调用**：一律走 `graph.llm_text()` / `graph.llm_tokens()`，它们带超时、
-    重试和并发闸门。直接 `llm.invoke()` 会绕过这些保护。
+10. **LLM 调用**：一律走 `graph.llm_text(prompt, agent_id)` / `graph.llm_tokens(...)`，
+    它们带超时、重试、并发闸门、**配额检查和 token 记账**。直接 `llm.invoke()`
+    会绕过全部保护，还会让这个客户的成本统计凭空少一块。
+11. **列表接口**：一律用 `_capped(rows, 名字, aid)` 收口。截断要打日志——
+    静默丢数据会让人以为"就这么多"。
+12. **聚合用 SQL**：统计类查询别把整表拉进内存再数（dashboard 原来就这么干的）。
 
 ## 架构速查
 - LangGraph 图：Supervisor(关键词fast-path+LLM路由) → policy/clientbook/drafting/action/chat/fallback → compliance

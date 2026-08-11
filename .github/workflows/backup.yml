@@ -1,0 +1,41 @@
+name: Nightly backup
+
+# 每天 UTC 18:00（马来西亚时间次日 02:00）备份一次生产库。
+# 需要在 repo 的 Settings → Secrets → Actions 里加 DATABASE_URL。
+on:
+  schedule:
+    - cron: "0 18 * * *"
+  workflow_dispatch:        # 也可以手动触发，用来做恢复演练
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 检查 secret 是否配好
+        run: |
+          if [ -z "${{ secrets.DATABASE_URL }}" ]; then
+            echo "❌ 没配 DATABASE_URL secret，备份没有在跑。" >&2
+            exit 1
+          fi
+
+      - name: 安装 pg_dump（版本要跟 Neon 对得上）
+        run: |
+          sudo sh -c 'echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-16
+
+      - name: 导出并校验
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: bash scripts/backup.sh "$GITHUB_WORKSPACE/backups"
+
+      - name: 上传备份
+        uses: actions/upload-artifact@v4
+        with:
+          name: hivora-backup-${{ github.run_id }}
+          path: backups/*.sql.gz
+          retention-days: 90
+          if-no-files-found: error

@@ -715,6 +715,9 @@ async function del(kind,id,label,after){
 }
 async function openTrash(){
   $("#trash-overlay").classList.remove("hide");
+  /* 先给个加载态，否则数据到之前会闪一下空白 */
+  $("#trash-hint").textContent="";
+  $("#trash-body").innerHTML=`<div class="thinking">载入中</div>`;
   const rows=await api("trash");
   $("#trash-hint").textContent=rows.length?`${rows.length} 项`:"";
   $("#trash-body").innerHTML=rows.length?rows.map(r=>

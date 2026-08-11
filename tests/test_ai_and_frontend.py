@@ -59,7 +59,7 @@ def test_action_node_survives_garbage(monkeypatch, raw):
     """模型什么都可能吐出来，绝不能 500。"""
     import db
     import graph
-    monkeypatch.setattr(graph, "llm_text", lambda p: raw)
+    monkeypatch.setattr(graph, "llm_text", lambda p, agent_id="": raw)
     out = graph.action_node({"messages": [("user", "帮我加客户")],
                              "agent_id": "ag_test", "route": "action",
                              "citations": [], "needs_human": False})
@@ -70,7 +70,7 @@ def test_action_node_adds_client(monkeypatch):
     import db
     import graph
     monkeypatch.setattr(graph, "llm_text",
-                        lambda p: '{"action":"add_client","name":"Ahmad","phone":"012"}')
+                        lambda p, agent_id="": '{"action":"add_client","name":"Ahmad","phone":"012"}')
     out = graph.action_node({"messages": [("user", "帮我加客户 Ahmad")],
                              "agent_id": "ag_actiontest", "route": "action",
                              "citations": [], "needs_human": False})
@@ -93,7 +93,7 @@ def test_ambiguous_client_in_ai_path_refuses(monkeypatch):
     finally:
         s.close()
     monkeypatch.setattr(graph, "llm_text",
-                        lambda p: '{"action":"add_policy","client":"Tan","product":"X"}')
+                        lambda p, agent_id="": '{"action":"add_policy","client":"Tan","product":"X"}')
     out = graph.action_node({"messages": [("user", "给 Tan 加保单")],
                              "agent_id": "ag_dup", "route": "action",
                              "citations": [], "needs_human": False})
@@ -103,7 +103,7 @@ def test_ambiguous_client_in_ai_path_refuses(monkeypatch):
 # ── LLM 不可用时的表现（#17）──────────────────────────────────
 def test_llm_failure_becomes_502_not_stacktrace(app_client, agent_factory, monkeypatch):
     import graph
-    def boom(prompt):
+    def boom(prompt, agent_id=""):
         raise graph.LLMUnavailable("AI 服务暂时不可用，请稍后再试")
     monkeypatch.setattr(graph, "llm_text", boom)
     tok, _ = agent_factory()
@@ -115,8 +115,8 @@ def test_llm_failure_becomes_502_not_stacktrace(app_client, agent_factory, monke
 # ── 流式输出（#18）────────────────────────────────────────────
 def test_stream_emits_route_tokens_done(app_client, agent_factory, monkeypatch):
     import graph
-    monkeypatch.setattr(graph, "route_of", lambda q: "drafting")
-    monkeypatch.setattr(graph, "llm_tokens", lambda p: iter(["你", "好", "呀"]))
+    monkeypatch.setattr(graph, "route_of", lambda q, agent_id="": "drafting")
+    monkeypatch.setattr(graph, "llm_tokens", lambda p, agent_id="": iter(["你", "好", "呀"]))
     tok, _ = agent_factory()
     with app_client.stream("POST", "/api/chat/stream", headers=H(tok),
                            json={"message": "写个话术"}) as r:
@@ -130,9 +130,9 @@ def test_stream_emits_route_tokens_done(app_client, agent_factory, monkeypatch):
 
 def test_stream_error_is_an_event_not_a_crash(app_client, agent_factory, monkeypatch):
     import graph
-    monkeypatch.setattr(graph, "route_of", lambda q: "chat")
+    monkeypatch.setattr(graph, "route_of", lambda q, agent_id="": "chat")
 
-    def boom(prompt):
+    def boom(prompt, agent_id=""):
         raise graph.LLMUnavailable("AI 服务暂时不可用，请稍后再试")
     monkeypatch.setattr(graph, "llm_tokens", boom)
     tok, _ = agent_factory()
@@ -145,8 +145,8 @@ def test_stream_error_is_an_event_not_a_crash(app_client, agent_factory, monkeyp
 def test_policy_answers_carry_disclaimer(app_client, agent_factory, monkeypatch):
     """合规红线 2：Policy/ClientBook 的回答必须带免责声明。"""
     import graph
-    monkeypatch.setattr(graph, "route_of", lambda q: "clientbook")
-    monkeypatch.setattr(graph, "llm_tokens", lambda p: iter(["答案"]))
+    monkeypatch.setattr(graph, "route_of", lambda q, agent_id="": "clientbook")
+    monkeypatch.setattr(graph, "llm_tokens", lambda p, agent_id="": iter(["答案"]))
     tok, _ = agent_factory()
     with app_client.stream("POST", "/api/chat/stream", headers=H(tok),
                            json={"message": "我有哪些客户"}) as r:

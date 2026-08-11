@@ -5,7 +5,10 @@ import logging
 import os
 import pathlib
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+import time
+import uuid
+
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from sqlalchemy import func
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -13,14 +16,69 @@ from pydantic import BaseModel
 
 import auth
 import db
+from contextvars import ContextVar
 from db import Appointment, Client, Fact, Message, Policy, Product, SessionLocal, Thread
-from graph import MODEL, LLMUnavailable, ask, ask_stream, llm_text
+from graph import MODEL, LLMUnavailable, QuotaExceeded, ask, ask_stream, llm_text
 from knowledge import search_policy_chunks
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent
+VERSION = "0.1"
+REQUEST_ID: ContextVar[str] = ContextVar("request_id", default="")
+
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)s %(name)s [%(request_id)s] %(message)s",
+)
+
+
+class _ReqIdFilter(logging.Filter):
+    """让每条日志都带上请求 id，出事时能把一次请求的所有日志串起来。"""
+    def filter(self, record):
+        record.request_id = REQUEST_ID.get() or "-"
+        return True
+
+
+logging.getLogger().handlers[0].addFilter(_ReqIdFilter())
 log = logging.getLogger("hivora")
 
-app = FastAPI(title="Hivora Insurance Agent")
+# Sentry：设了 DSN 才启用，没设就完全不引入（本地和测试不受影响）
+if os.environ.get("SENTRY_DSN"):
+    try:
+        import sentry_sdk
+        sentry_sdk.init(dsn=os.environ["SENTRY_DSN"],
+                        environment="production" if db.IS_PROD else "dev",
+                        release=f"hivora@{VERSION}",
+                        traces_sample_rate=float(os.environ.get("SENTRY_TRACES", "0.0")),
+                        send_default_pii=False)   # 别把客户数据送出去
+        log.info("Sentry 已启用")
+    except ImportError:
+        log.warning("设了 SENTRY_DSN 但没装 sentry-sdk，跳过")
+
+app = FastAPI(title="Hivora Insurance Agent", version=VERSION)
+
+
+@app.middleware("http")
+async def observability(request: Request, call_next):
+    rid = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
+    token = REQUEST_ID.set(rid)
+    started = time.perf_counter()
+    try:
+        resp = await call_next(request)
+    except Exception:
+        log.exception("未处理异常 %s %s", request.method, request.url.path)
+        raise
+    finally:
+        REQUEST_ID.reset(token)
+    ms = (time.perf_counter() - started) * 1000
+    if ms > SLOW_MS or resp.status_code >= 500:
+        log.warning("%s %s → %s (%.0fms)", request.method, request.url.path,
+                    resp.status_code, ms)
+    resp.headers["X-Request-ID"] = rid
+    # 基础安全响应头
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Referrer-Policy"] = "same-origin"
+    resp.headers["X-Frame-Options"] = "DENY"
+    return resp
 
 # CORS：生产必须显式列出前端域名，不能是 *。
 _origins = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
@@ -40,6 +98,16 @@ auth.ensure_admin()
 AID = Depends(auth.current_agent)
 ADM = Depends(auth.current_admin)
 
+SLOW_MS = int(os.environ.get("SLOW_REQUEST_MS", "3000"))
+LIST_CAP = int(os.environ.get("LIST_CAP", "500"))   # 单次返回的最大条数
+
+
+def _capped(rows: list, what: str, aid: str) -> list:
+    """超过上限就截断并记一条日志——绝不静默丢数据。"""
+    if len(rows) > LIST_CAP:
+        log.warning("列表截断 %s agent=%s 返回 %d 条（共 >%d）", what, aid, LIST_CAP, LIST_CAP)
+        return rows[:LIST_CAP]
+    return rows
 MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "20"))
 ALLOWED_UPLOAD_EXT = (".pdf", ".txt", ".md")
 
@@ -53,12 +121,32 @@ def index():
     return FileResponse(BASE_DIR / "static" / "index.html")
 
 
-VERSION = "0.1"
-
-
 @app.get("/healthz")
 def healthz():
+    """存活探针 —— 只说明进程还在。"""
     return {"ok": True, "model": MODEL, "version": VERSION}
+
+
+@app.get("/readyz")
+def readyz():
+    """就绪探针 —— 真去点一下数据库。挂了要能立刻看出是 DB 还是应用。"""
+    from sqlalchemy import text
+    checks = {}
+    try:
+        s = SessionLocal()
+        try:
+            s.execute(text("SELECT 1"))
+            checks["db"] = "ok"
+        finally:
+            s.close()
+    except Exception as e:
+        log.exception("readyz: 数据库不可用")
+        checks["db"] = f"fail: {type(e).__name__}"
+    checks["llm_configured"] = bool(os.environ.get("OPENROUTER_API_KEY"))
+    checks["storage"] = "postgres" if not db.DB_URL.startswith("sqlite") else "sqlite"
+    ok = checks["db"] == "ok"
+    return JSONResponse(status_code=200 if ok else 503,
+                        content={"ok": ok, "version": VERSION, "checks": checks})
 
 
 # ── Copilot ───────────────────────────────────────────────────
@@ -71,11 +159,18 @@ def _llm_unavailable(request, exc):
     return JSONResponse(status_code=502, content={"error": str(exc)})
 
 
+@app.exception_handler(QuotaExceeded)
+def _quota_exceeded(request, exc):
+    return JSONResponse(status_code=429, content={"error": str(exc), "detail": str(exc)})
+
+
 @app.post("/api/chat")
 def chat(req: ChatReq, aid: str = AID):
     """整段返回。前端默认走 /api/chat/stream，这个保留给非流式调用方和测试。"""
     try:
         return ask(req.message, aid)
+    except QuotaExceeded as e:
+        return JSONResponse(status_code=429, content={"error": str(e), "detail": str(e)})
     except LLMUnavailable as e:
         return JSONResponse(status_code=502, content={"error": str(e)})
     except Exception:
@@ -106,17 +201,29 @@ def chat_stream(req: ChatReq, aid: str = AID):
 def dashboard(aid: str = AID):
     s = SessionLocal()
     try:
+        # 全部走 SQL 聚合。原来把 policies/threads/appointments 整表拉进内存再数，
+        # 数据一多就是 O(全表) 的内存和延迟。
+        today_s = db.today().isoformat()
+        in30 = (db.today() + dt.timedelta(days=30)).isoformat()
+        in7 = (db.today() + dt.timedelta(days=7)).isoformat()
+
         clients = db.live(s.query(Client), Client).filter_by(agent_id=aid).count()
-        pols = db.live(db.live(s.query(Policy), Policy).join(Client), Client).filter(
-            Client.agent_id == aid).all()
-        renew30 = sum(1 for p in pols if 0 <= db.days_until(p.renewal) <= 30)
-        threads = s.query(Thread).filter_by(agent_id=aid).all()
-        pending = sum(1 for t in threads if t.status != "sent")
-        ai_rate = round(sum(1 for t in threads if t.status == "sent") / len(threads) * 100) if threads else 0
-        appts7 = sum(1 for a in db.live(s.query(Appointment), Appointment).filter_by(agent_id=aid)
-                     if 0 <= db.days_until(a.date) <= 7)
+        pol_q = db.live(db.live(s.query(Policy), Policy).join(Client), Client).filter(
+            Client.agent_id == aid)
+        policies = pol_q.count()
+        renew30 = pol_q.filter(Policy.renewal >= today_s, Policy.renewal <= in30).count()
+
+        total_threads = s.query(func.count(Thread.id)).filter_by(agent_id=aid).scalar() or 0
+        sent = (s.query(func.count(Thread.id))
+                .filter_by(agent_id=aid, status="sent").scalar() or 0)
+        pending = total_threads - sent
+        ai_rate = round(sent / total_threads * 100) if total_threads else 0
+
+        appts7 = (db.live(s.query(Appointment), Appointment)
+                  .filter(Appointment.agent_id == aid,
+                          Appointment.date >= today_s, Appointment.date <= in7).count())
         facts = db.live(s.query(Fact), Fact).filter_by(agent_id=aid).count()
-        return dict(clients=clients, policies=len(pols), renewals_30d=renew30,
+        return dict(clients=clients, policies=policies, renewals_30d=renew30,
                     pending_replies=pending, ai_handled_pct=ai_rate,
                     facts=facts, appts_7d=appts7,
                     today=db.today().isoformat(), model=MODEL)
@@ -189,7 +296,7 @@ def suggest(tid: int, aid: str = AID):
                   "不构成 financial advice；不编数字。\n"
                   '只输出 JSON 数组（无代码块、无解释）：["回复1","回复2","回复3"]\n\n'
                   f"{ci}\n\n相关条款：\n{ctx}\n\n代理人补充知识：\n{facts}\n\n对话：\n{convo}")
-        raw = llm_text(prompt).strip()
+        raw = llm_text(prompt, aid).strip()
         raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         try:
             sugg = [x for x in json.loads(raw) if isinstance(x, str)][:3]
@@ -333,8 +440,10 @@ def _client_by_name(s, aid: str, name: str) -> Client:
 def clients(aid: str = AID):
     s = SessionLocal()
     try:
-        return [db.client_dict(c)
-                for c in db.live(s.query(Client), Client).filter_by(agent_id=aid)]
+        rows = [db.client_dict(c)
+                for c in db.live(s.query(Client), Client)
+                          .filter_by(agent_id=aid).limit(LIST_CAP + 1)]
+        return _capped(rows, "clients", aid)
     finally:
         s.close()
 
@@ -458,9 +567,10 @@ def appointments(aid: str = AID):
     try:
         rows = [dict(id=a.id, client=a.client, date=a.date, time=a.time,
                      purpose=a.purpose, channel=a.channel, days=db.days_until(a.date))
-                for a in db.live(s.query(Appointment), Appointment).filter_by(agent_id=aid)]
+                for a in db.live(s.query(Appointment), Appointment)
+                          .filter_by(agent_id=aid).limit(LIST_CAP + 1)]
         rows.sort(key=lambda r: (r["date"], r["time"]))
-        return rows
+        return _capped(rows, "appointments", aid)
     finally:
         s.close()
 
@@ -483,14 +593,15 @@ def add_appointment(req: ApptReq, aid: str = AID):
 def renewals(aid: str = AID):
     s = SessionLocal()
     try:
-        rows = []
-        for c in db.live(s.query(Client), Client).filter_by(agent_id=aid):
-            for p in (x for x in c.policies if not x.deleted):
-                rows.append(dict(client=c.name, phone=c.phone, product=p.product,
-                                 policy_no=p.policy_no, renewal=p.renewal,
-                                 premium=p.premium, days=db.days_until(p.renewal)))
-        rows.sort(key=lambda r: r["days"])
-        return rows
+        # 一次 join 查完，不再对每个客户各查一次保单（N+1）
+        q = (db.live(db.live(s.query(Policy, Client), Policy).join(Client), Client)
+             .filter(Client.agent_id == aid)
+             .order_by(Policy.renewal))
+        rows = [dict(client=c.name, phone=c.phone, product=p.product,
+                     policy_no=p.policy_no, renewal=p.renewal,
+                     premium=p.premium, days=db.days_until(p.renewal))
+                for p, c in q.limit(LIST_CAP + 1).all()]
+        return _capped(rows, "renewals", aid)
     finally:
         s.close()
 
@@ -518,7 +629,7 @@ def opportunity(req: OppReq, aid: str = AID):
                   f"客户档案：{profile}\n\n产品目录：\n{catalog}")
         db.audit(s, aid, "opportunity", req.client)
         s.commit()
-        return dict(analysis=llm_text(prompt))
+        return dict(analysis=llm_text(prompt, aid))
     finally:
         s.close()
 
@@ -736,9 +847,17 @@ def admin_agents(_: str = ADM):
         counts = dict(s.query(Client.agent_id, func.count(Client.id))
                       .filter((Client.deleted == "") | (Client.deleted.is_(None)))
                       .group_by(Client.agent_id).all())
+        month = db.today().isoformat()[:7]
+        used = dict(s.query(db.UsageDaily.agent_id,
+                            func.sum(db.UsageDaily.prompt_tokens)
+                            + func.sum(db.UsageDaily.completion_tokens))
+                    .filter(db.UsageDaily.day.like(month + "%"))
+                    .group_by(db.UsageDaily.agent_id).all())
         return [dict(id=a.id, email=a.email, name=a.name, role=a.role,
                      active=bool(a.active), plan=a.plan, expires=a.expires or "",
-                     agent_key=a.agent_key, clients=counts.get(a.agent_key, 0))
+                     agent_key=a.agent_key, clients=counts.get(a.agent_key, 0),
+                     tokens=int(used.get(a.agent_key, 0) or 0),
+                     token_quota=a.token_quota or 0)
                 for a in s.query(db.Agent).order_by(db.Agent.id).all()]
     finally:
         s.close()
@@ -812,6 +931,66 @@ def admin_set_plan(agent_id: int, req: PlanReq, adm: str = ADM):
         db.audit(s, adm, "set_plan", f"{a.email}:{a.plan}:{exp or '不限期'}")
         s.commit()
         return dict(ok=True, plan=a.plan, expires=a.expires)
+    finally:
+        s.close()
+
+
+@app.get("/api/usage")
+def my_usage(aid: str = AID):
+    """代理人看自己本月的 AI 用量和剩余额度。"""
+    used, limit = db.month_tokens(aid), db.quota_for(aid)
+    return dict(month=db.today().isoformat()[:7], tokens=used,
+                limit=(None if limit < 0 else limit),
+                pct=(None if limit < 0 else round(used / limit * 100) if limit else 0))
+
+
+@app.get("/api/admin/usage")
+def admin_usage(month: str = "", _: str = ADM):
+    """按账号汇总的 token 用量与成本 —— 定价和防滥用都靠它。"""
+    month = month or db.today().isoformat()[:7]
+    s = SessionLocal()
+    try:
+        rows = (s.query(db.UsageDaily.agent_id,
+                        func.sum(db.UsageDaily.prompt_tokens),
+                        func.sum(db.UsageDaily.completion_tokens),
+                        func.sum(db.UsageDaily.calls))
+                .filter(db.UsageDaily.day.like(month + "%"))
+                .group_by(db.UsageDaily.agent_id).all())
+        emails = dict(s.query(db.Agent.agent_key, db.Agent.email).all())
+        quotas = dict(s.query(db.Agent.agent_key, db.Agent.token_quota).all())
+        out = []
+        for key, inp, outp, calls in rows:
+            inp, outp = int(inp or 0), int(outp or 0)
+            q = quotas.get(key) or 0
+            limit = db.MONTHLY_TOKEN_QUOTA if q == 0 else q
+            out.append(dict(agent_key=key, agent=emails.get(key, key),
+                            prompt_tokens=inp, completion_tokens=outp,
+                            tokens=inp + outp, calls=int(calls or 0),
+                            cost_usd=db.cost_usd(inp, outp),
+                            limit=(None if limit < 0 else limit)))
+        out.sort(key=lambda r: -r["tokens"])
+        return dict(month=month, agents=out,
+                    total_tokens=sum(r["tokens"] for r in out),
+                    total_cost_usd=round(sum(r["cost_usd"] for r in out), 4))
+    finally:
+        s.close()
+
+
+class QuotaReq(BaseModel):
+    token_quota: int = 0      # 0=用全局默认，-1=不限
+
+
+@app.post("/api/admin/agents/{agent_id}/quota")
+def admin_set_quota(agent_id: int, req: QuotaReq, adm: str = ADM):
+    s = SessionLocal()
+    try:
+        a = s.query(db.Agent).filter_by(id=agent_id).first()
+        if not a:
+            raise HTTPException(404, "账号不存在")
+        a.token_quota = int(req.token_quota)
+        db.audit(s, adm, "set_quota", f"{a.email}:{a.token_quota}")
+        s.commit()
+        return dict(ok=True, token_quota=a.token_quota)
     finally:
         s.close()
 

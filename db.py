@@ -3,8 +3,8 @@ import datetime as dt
 import json
 import os
 
-from sqlalchemy import (Column, Date, ForeignKey, Integer, String, Text,
-                        create_engine)
+from sqlalchemy import (Column, Float, ForeignKey, Integer, String, Text,
+                        UniqueConstraint, create_engine, func)
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
 IS_PROD = os.environ.get("HIVORA_ENV", "").strip().lower() in ("prod", "production")
@@ -108,6 +108,30 @@ class Message(Base):
     ts = Column(String(20), default="")
 
 
+class UsageDaily(Base):
+    """按 账号 × 日期 × 模型 汇总的 token 用量。
+
+    以前完全不知道一个客户成本多少 —— 没法定价，也拦不住滥用。
+    """
+    __tablename__ = "usage_daily"
+    id = Column(Integer, primary_key=True)
+    agent_id = Column(String(64), index=True)
+    day = Column(String(10), index=True)        # YYYY-MM-DD
+    model = Column(String(120), default="")
+    prompt_tokens = Column(Integer, default=0)
+    completion_tokens = Column(Integer, default=0)
+    calls = Column(Integer, default=0)
+    __table_args__ = (UniqueConstraint("agent_id", "day", "model", name="uq_usage_day"),)
+
+
+class LoginLock(Base):
+    """登录失败计数。落库而不是放进程内存 —— 否则扩到第二个实例就形同虚设。"""
+    __tablename__ = "login_locks"
+    email = Column(String(200), primary_key=True)
+    fails = Column(Integer, default=0)
+    until = Column(Float, default=0.0)          # unix 时间戳
+
+
 class Audit(Base):
     __tablename__ = "audit_log"
     id = Column(Integer, primary_key=True)
@@ -136,6 +160,76 @@ def days_until(date_s: str) -> int:
         return (dt.date(y, m, d) - today()).days
     except (ValueError, AttributeError):
         return 9999
+
+
+MONTHLY_TOKEN_QUOTA = int(os.environ.get("MONTHLY_TOKEN_QUOTA", "2000000"))
+# 每百万 token 的价格（美元）。跟着你实际用的模型改，默认按 DeepSeek v3.2 量级。
+PRICE_IN = float(os.environ.get("PRICE_PER_MTOK_IN", "0.28"))
+PRICE_OUT = float(os.environ.get("PRICE_PER_MTOK_OUT", "0.42"))
+
+
+def record_usage(agent_id: str, model: str, prompt_tokens: int, completion_tokens: int):
+    """累加用量。失败不能影响主流程——记账挂了也不该让用户的请求失败。"""
+    if not agent_id:
+        return
+    import logging
+    s = None
+    try:
+        # 建 session 本身也可能失败（数据库不通），所以整段都要包住：
+        # 记账是附带动作，任何情况下都不该把异常抛给用户的请求。
+        s = SessionLocal()
+        day = today().isoformat()
+        row = (s.query(UsageDaily)
+               .filter_by(agent_id=agent_id, day=day, model=model or "").first())
+        if row is None:
+            row = UsageDaily(agent_id=agent_id, day=day, model=model or "")
+            s.add(row)
+        row.prompt_tokens = (row.prompt_tokens or 0) + max(0, prompt_tokens)
+        row.completion_tokens = (row.completion_tokens or 0) + max(0, completion_tokens)
+        row.calls = (row.calls or 0) + 1
+        s.commit()
+    except Exception:
+        logging.getLogger("hivora.usage").warning("记账失败 agent=%s", agent_id, exc_info=True)
+        if s is not None:
+            try:
+                s.rollback()
+            except Exception:
+                pass
+    finally:
+        if s is not None:
+            try:
+                s.close()
+            except Exception:
+                pass
+
+
+def month_tokens(agent_id: str, month: str = "") -> int:
+    """某账号本月已用的 token 总数。"""
+    month = month or today().isoformat()[:7]
+    s = SessionLocal()
+    try:
+        row = (s.query(func.coalesce(func.sum(UsageDaily.prompt_tokens), 0)
+                       + func.coalesce(func.sum(UsageDaily.completion_tokens), 0))
+               .filter(UsageDaily.agent_id == agent_id,
+                       UsageDaily.day.like(month + "%")).scalar())
+        return int(row or 0)
+    finally:
+        s.close()
+
+
+def quota_for(agent_id: str) -> int:
+    """该账号的月度上限。-1 表示不限。"""
+    s = SessionLocal()
+    try:
+        a = s.query(Agent).filter_by(agent_key=agent_id).first()
+        q = (a.token_quota if a and a.token_quota is not None else 0)
+        return MONTHLY_TOKEN_QUOTA if q == 0 else q
+    finally:
+        s.close()
+
+
+def cost_usd(prompt_tokens: int, completion_tokens: int) -> float:
+    return round(prompt_tokens / 1e6 * PRICE_IN + completion_tokens / 1e6 * PRICE_OUT, 4)
 
 
 def audit(s, agent_id, action, detail=""):
@@ -233,6 +327,7 @@ class Agent(Base):
     active = Column(Integer, default=1)
     plan = Column(String(32), default="trial")
     expires = Column(String(10), default="")        # YYYY-MM-DD，空=不限
+    token_quota = Column(Integer, default=0)        # 月度 token 上限；0=用全局默认，-1=不限
 
 
 class Document(Base):
@@ -293,6 +388,7 @@ def migrate_columns():
             "ALTER TABLE appointments ADD COLUMN deleted VARCHAR(24) DEFAULT ''",
             "ALTER TABLE facts ADD COLUMN deleted VARCHAR(24) DEFAULT ''",
             "ALTER TABLE documents ADD COLUMN deleted VARCHAR(24) DEFAULT ''",
+            "ALTER TABLE agents ADD COLUMN token_quota INTEGER DEFAULT 0",
         ]:
             try:
                 conn.execute(text(ddl))
