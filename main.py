@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 import auth
 import db
+import email_out
 import telegram
 from contextvars import ContextVar
 from db import Appointment, Client, Fact, Message, Policy, Product, SessionLocal, Thread
@@ -1036,6 +1037,7 @@ def admin_toggle(agent_id: int, req: ToggleReq, adm: str = ADM):
 
 class PasswordReq(BaseModel):
     password: str
+    notify: bool = True      # 是否把新密码发信告知本人
 
 
 @app.post("/api/admin/agents/{agent_id}/password")
@@ -1052,7 +1054,9 @@ def admin_reset_password(agent_id: int, req: PasswordReq, adm: str = ADM):
         a.pw_hash, a.salt = auth.hash_pw(req.password, salt), salt
         db.audit(s, adm, "reset_password", a.email)
         s.commit()
-        return {"ok": True}
+        sent = req.notify and email_out.password_reset(a.email, a.name, req.password)
+        return {"ok": True, "email_sent": bool(sent),
+                "email_configured": email_out.configured()}
     finally:
         s.close()
 
@@ -1145,6 +1149,15 @@ def admin_set_quota(agent_id: int, req: QuotaReq, adm: str = ADM):
         s.close()
 
 
+@app.get("/api/admin/settings")
+def admin_settings(_: str = ADM):
+    """管理站需要知道哪些能力已配好，才知道该提示什么。"""
+    return dict(email_configured=email_out.configured(),
+                login_url=email_out.LOGIN_URL,
+                telegram_ready=bool(os.environ.get("PUBLIC_BASE_URL")),
+                version=VERSION)
+
+
 @app.get("/api/admin/audit")
 def admin_audit(agent_key: str = "", action: str = "", limit: int = 100,
                 _: str = ADM):
@@ -1197,12 +1210,19 @@ def admin_create_agent(req: CreateAgentReq, adm: str = ADM):
         if s.query(db.Agent).filter_by(email=email).first():
             raise HTTPException(400, "该账号已存在")
         salt = _s.token_hex(16)
+        name = req.name or email.split("@")[0]
         s.add(db.Agent(agent_key="ag_" + _s.token_hex(8), email=email,
-                       name=req.name or email.split("@")[0],
+                       name=name,
                        pw_hash=auth.hash_pw(req.password, salt), salt=salt,
                        plan=req.plan or "paid"))
         db.audit(s, adm, "admin_create_agent", email)
         s.commit()
-        return {"ok": True}
+        # 账号已经建好了。发信只是通知手段，发不出去也不能让这个接口失败——
+        # 管理站会把凭据显示出来让管理员手动发。
+        sent = email_out.welcome(email, name, req.password)
+        db.audit(s, adm, "welcome_email", f"{email}:{'sent' if sent else 'skipped'}")
+        s.commit()
+        return {"ok": True, "email_sent": sent,
+                "email_configured": email_out.configured()}
     finally:
         s.close()

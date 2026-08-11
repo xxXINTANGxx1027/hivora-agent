@@ -35,6 +35,19 @@ services:
       # Telegram webhook 的回调地址 —— 不填代理人就连不上自己的 bot
       - key: PUBLIC_BASE_URL
         value: https://hivora-agent-stage.onrender.com
+      # 开通邮件。不填则建账号后需要手动把密码发给代理人
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: APP_LOGIN_URL
+        value: https://hivora-frontend.vercel.app
       # 错误监控：填了 DSN 才启用，不填完全不引入
       - key: SENTRY_DSN
         sync: false

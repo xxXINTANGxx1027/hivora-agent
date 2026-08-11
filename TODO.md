@@ -11,27 +11,21 @@
 
 ---
 
-## 🚨 先做这一件，它挡着其他所有验证
+## ✅ 已上线（2026-08-12）
 
-本地有 **9 个提交没推**，线上跑的还是几小时前的版本 —— 拆站、Telegram、
-运维加固、线索转化全都没上去。客户端还能看到「管理后台」就是这个原因。
+V0.1 全部推上生产并验证过：客户端已无管理代码、后端 build 与本地一致、
+存储是 Postgres、自助注册已撤销。
 
-```bash
-cd "/Users/xt/Documents/claude/hivora/[hivora] Insurance-agent_internal-hivora_r&d"
-./push.sh
+```
+客户端 管理后台/邀请码/代理人账号 → 0 处（推之前 3/6/3）
+后端   build 914884f73690 · storage postgres
 ```
 
-会先跑测试、列出要推什么、问你一次，推完自动验证线上真的换版本了。
-
-> 项目根目录**不是** git repo，直接敲 `git push` 会报 `not a git repository`——
-> 前两次就是这么以为推过了的。
+以后用 `./push.sh` 发布，它会自动验证线上真的换版本了。
 
 ---
 
 ## P0 · 发第一个付费账号之前
-
-- [ ] **推送 9 个提交** · 你来
-      不做的话，下面所有线上验证都在测旧代码。
 
 - [ ] **Render 加 `PUBLIC_BASE_URL`** · 你来 · 2 分钟
       Telegram 要靠它回调。不配的话代理人点「连接 Telegram」直接报错，客户渠道整个不能用。
@@ -39,8 +33,8 @@ cd "/Users/xt/Documents/claude/hivora/[hivora] Insurance-agent_internal-hivora_r
       PUBLIC_BASE_URL = https://hivora-agent-stage.onrender.com
       ```
 
-- [ ] **建 `hivora-admin` repo + Vercel 项目** · 你来 · 10 分钟
-      管理站代码写好了但还没有远端仓库。
+- [ ] **建 `hivora-admin` repo + Vercel 项目** · 你来 · 10 分钟 · **现在最要紧**
+      管理站已经从客户端摘掉了，但它自己还没上线 —— 也就是说**你现在没有地方进管理后台**。
       ```bash
       cd admin && git remote add origin git@github.com:xxXINTANGxx1027/hivora-admin.git
       git push -u origin main
@@ -54,9 +48,12 @@ cd "/Users/xt/Documents/claude/hivora/[hivora] Insurance-agent_internal-hivora_r
       **这是产品能不能用的根本，而且只有你能做。** 线上条款库现在是空的，
       代理人问任何条款问题回答都是「条款库里没查到」。上传界面已经能用。
 
-- [ ] **开通邮件**（WP-1）· 我来 · 半天
-      流程是「买配套 → admin 建账号 → 发 email 让他登录」，中间发信这步现在完全没有，
-      密码要人工复制发过去。做成 SMTP 通用，没配就降级回手动模式。
+- [x] ~~**开通邮件**（WP-1）· 已完成~~
+      admin 建完账号自动发登录信（含四步引导）。SMTP 通用，任何服务商都能接。
+      **还需要你配 SMTP 变量**才会真的发出去 —— 不配的话管理站会把凭据摆出来让你手动发。
+      ```
+      SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASSWORD / SMTP_FROM
+      ```
 
 - [ ] **开通引导**（WP-2）· 我来 · 半天
       「账号是空的全靠自己弄」是最大的流失点。新账号第一屏给四步清单：
@@ -130,4 +127,4 @@ token 过期 + 停用即失效 · 生产守卫（弱配置拒绝启动）· 前�
 LLM 超时/重试/并发闸门 · SSE 流式输出 · 管理站拆成独立站点 · 重置密码 / 套餐到期 /
 审计日志 UI · token 用量与成本 + 月度配额 · 可观测性（request id / readyz / Sentry 钩子）·
 备份脚本 + 每日工作流 + [RUNBOOK.md](RUNBOOK.md) · Telegram 客户渠道 + 代理人助手 ·
-线索标识 + 一键转客户 · 119 个测试 + 三个 CI job · `push.sh` 一键发布并验证
+线索标识 + 一键转客户 · 130 个测试 + 三个 CI job · 开通邮件 · `push.sh` 一键发布并验证
