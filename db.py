@@ -189,3 +189,39 @@ def seed_if_empty():
         s.commit()
     finally:
         s.close()
+
+
+class Agent(Base):
+    __tablename__ = "agents"
+    id = Column(Integer, primary_key=True)
+    agent_key = Column(String(64), unique=True, index=True)
+    email = Column(String(200), unique=True, index=True)
+    name = Column(String(200), default="")
+    pw_hash = Column(String(200))
+    salt = Column(String(64))
+
+
+class Document(Base):
+    __tablename__ = "documents"
+    id = Column(Integer, primary_key=True)
+    agent_id = Column(String(64), index=True)
+    filename = Column(String(300))
+    insurer = Column(String(200), default="")
+    product = Column(String(200), default="")
+    pages = Column(Integer, default=0)
+    chunks = relationship("Chunk", cascade="all,delete", backref="document")
+
+
+class Chunk(Base):
+    __tablename__ = "chunks"
+    id = Column(Integer, primary_key=True)
+    doc_id = Column(Integer, ForeignKey("documents.id"), index=True)
+    agent_id = Column(String(64), index=True)
+    product = Column(String(200), default="")
+    insurer = Column(String(200), default="")
+    page = Column(Integer, default=0)
+    text = Column(Text)
+
+
+def ensure_schema():
+    Base.metadata.create_all(engine)

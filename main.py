@@ -5,18 +5,21 @@ import os
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
+import auth
 import db
 from db import Appointment, Client, Fact, Message, Policy, Product, SessionLocal, Thread
 from graph import MODEL, ask, llm
 from knowledge import search_policy_chunks
 
 app = FastAPI(title="Hivora Insurance Agent")
+db.ensure_schema()
 db.seed_if_empty()
-AGENT_ID = "agent_demo"   # TODO: 多租户登录后从会话取
+auth.ensure_demo_agent()
+AID = Depends(auth.current_agent)
 
 
 def now_hm():
@@ -36,31 +39,30 @@ def healthz():
 # ── Copilot ───────────────────────────────────────────────────
 class ChatReq(BaseModel):
     message: str
-    agent_id: str = AGENT_ID
 
 
 @app.post("/api/chat")
-def chat(req: ChatReq):
+def chat(req: ChatReq, aid: str = AID):
     try:
-        return ask(req.message, req.agent_id)
+        return ask(req.message, aid)
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 # ── Dashboard ─────────────────────────────────────────────────
 @app.get("/api/dashboard")
-def dashboard():
+def dashboard(aid: str = AID):
     s = SessionLocal()
     try:
-        clients = s.query(Client).filter_by(agent_id=AGENT_ID).count()
-        pols = s.query(Policy).join(Client).filter(Client.agent_id == AGENT_ID).all()
+        clients = s.query(Client).filter_by(agent_id=aid).count()
+        pols = s.query(Policy).join(Client).filter(Client.agent_id == aid).all()
         renew30 = sum(1 for p in pols if 0 <= db.days_until(p.renewal) <= 30)
-        threads = s.query(Thread).filter_by(agent_id=AGENT_ID).all()
+        threads = s.query(Thread).filter_by(agent_id=aid).all()
         pending = sum(1 for t in threads if t.status != "sent")
         ai_rate = round(sum(1 for t in threads if t.status == "sent") / len(threads) * 100) if threads else 0
-        appts7 = sum(1 for a in s.query(Appointment).filter_by(agent_id=AGENT_ID)
+        appts7 = sum(1 for a in s.query(Appointment).filter_by(agent_id=aid)
                      if 0 <= db.days_until(a.date) <= 7)
-        facts = s.query(Fact).filter_by(agent_id=AGENT_ID).count()
+        facts = s.query(Fact).filter_by(agent_id=aid).count()
         return dict(clients=clients, policies=len(pols), renewals_30d=renew30,
                     pending_replies=pending, ai_handled_pct=ai_rate,
                     facts=facts, appts_7d=appts7,
@@ -71,11 +73,11 @@ def dashboard():
 
 # ── 收件箱 ────────────────────────────────────────────────────
 @app.get("/api/inbox")
-def inbox():
+def inbox(aid: str = AID):
     s = SessionLocal()
     try:
         out = []
-        for t in s.query(Thread).filter_by(agent_id=AGENT_ID).all():
+        for t in s.query(Thread).filter_by(agent_id=aid).all():
             last = t.messages[-1] if t.messages else None
             out.append(dict(id=t.id, client=t.client, unread=t.unread, status=t.status,
                             last=(last.text[:60] if last else ""), ts=(last.ts if last else "")))
@@ -84,8 +86,8 @@ def inbox():
         s.close()
 
 
-def _thread(s, tid):
-    t = s.query(Thread).filter_by(id=tid, agent_id=AGENT_ID).first()
+def _thread(s, tid, aid):
+    t = s.query(Thread).filter_by(id=tid, agent_id=aid).first()
     if not t:
         raise HTTPException(404)
     return t
@@ -98,22 +100,22 @@ def _thread_dict(t):
 
 
 @app.get("/api/inbox/{tid}")
-def thread(tid: int):
+def thread(tid: int, aid: str = AID):
     s = SessionLocal()
     try:
-        return _thread_dict(_thread(s, tid))
+        return _thread_dict(_thread(s, tid, aid))
     finally:
         s.close()
 
 
-def _ctx_for(s, t):
-    client = (s.query(Client).filter_by(agent_id=AGENT_ID)
+def _ctx_for(s, t, aid):
+    client = (s.query(Client).filter_by(agent_id=aid)
               .filter(Client.name == t.client).first())
     convo = "\n".join(f"{m.role}: {m.text}" for m in t.messages[-5:])
     q = t.messages[-1].text if t.messages else ""
-    chunks = search_policy_chunks(q)
+    chunks = search_policy_chunks(q, aid)
     ctx = "\n".join(f"- {c['product']} 第{c['page']}页: {c['text']}" for c in chunks)
-    facts = "\n".join(f"- {f.text}" for f in s.query(Fact).filter_by(agent_id=AGENT_ID))
+    facts = "\n".join(f"- {f.text}" for f in s.query(Fact).filter_by(agent_id=aid))
     ci = ""
     if client:
         pols = "; ".join(f"{p.product}({p.policy_no}, 续保 {p.renewal}, {p.premium})"
@@ -123,11 +125,11 @@ def _ctx_for(s, t):
 
 
 @app.post("/api/inbox/{tid}/suggest")
-def suggest(tid: int):
+def suggest(tid: int, aid: str = AID):
     s = SessionLocal()
     try:
-        t = _thread(s, tid)
-        ci, ctx, facts, convo = _ctx_for(s, t)
+        t = _thread(s, tid, aid)
+        ci, ctx, facts, convo = _ctx_for(s, t, aid)
         prompt = ("你是马来西亚保险代理人的 WhatsApp 回复助手。给出 3 条可选回复，"
                   "风格分别是：1) 专业详细 2) 亲切热情 3) 简短快捷。\n"
                   f"要求：用{t.lang}写；像真人代理人；只根据资料回答，拿不准就说会帮客户确认；"
@@ -154,10 +156,10 @@ class SendReq(BaseModel):
 
 
 @app.post("/api/inbox/{tid}/send")
-def send(tid: int, req: SendReq):
+def send(tid: int, req: SendReq, aid: str = AID):
     s = SessionLocal()
     try:
-        t = _thread(s, tid)
+        t = _thread(s, tid, aid)
         s.add(Message(thread_id=t.id, role="agent", text=req.text, ts=now_hm()))
         t.status, t.suggestions, t.unread = "sent", "[]", 0
         db.audit(s, "send", f"thread={tid}")
@@ -172,10 +174,10 @@ class ModeReq(BaseModel):
 
 
 @app.post("/api/inbox/{tid}/mode")
-def set_mode(tid: int, req: ModeReq):
+def set_mode(tid: int, req: ModeReq, aid: str = AID):
     s = SessionLocal()
     try:
-        t = _thread(s, tid)
+        t = _thread(s, tid, aid)
         t.mode = req.mode if req.mode in ("ai", "human") else "ai"
         if t.mode == "human":
             t.suggestions = "[]"
@@ -186,10 +188,10 @@ def set_mode(tid: int, req: ModeReq):
 
 
 @app.post("/api/inbox/{tid}/customer")
-def customer_message(tid: int, req: SendReq):
+def customer_message(tid: int, req: SendReq, aid: str = AID):
     s = SessionLocal()
     try:
-        t = _thread(s, tid)
+        t = _thread(s, tid, aid)
         s.add(Message(thread_id=t.id, role="customer", text=req.text, ts=now_hm()))
         t.status, t.suggestions, t.unread = "pending", "[]", t.unread + 1
         s.commit()
@@ -204,20 +206,20 @@ class FactReq(BaseModel):
 
 
 @app.get("/api/facts")
-def get_facts():
+def get_facts(aid: str = AID):
     s = SessionLocal()
     try:
-        return {"facts": [f.text for f in s.query(Fact).filter_by(agent_id=AGENT_ID)]}
+        return {"facts": [f.text for f in s.query(Fact).filter_by(agent_id=aid)]}
     finally:
         s.close()
 
 
 @app.post("/api/facts")
-def add_fact(req: FactReq):
+def add_fact(req: FactReq, aid: str = AID):
     s = SessionLocal()
     try:
         if req.text.strip():
-            s.add(Fact(agent_id=AGENT_ID, text=req.text.strip()))
+            s.add(Fact(agent_id=aid, text=req.text.strip()))
             db.audit(s, "teach", req.text[:100])
             s.commit()
         return {"ok": True}
@@ -249,19 +251,19 @@ class PolicyUpdateReq(PolicyReq):
 
 
 @app.get("/api/clients")
-def clients():
+def clients(aid: str = AID):
     s = SessionLocal()
     try:
-        return [db.client_dict(c) for c in s.query(Client).filter_by(agent_id=AGENT_ID)]
+        return [db.client_dict(c) for c in s.query(Client).filter_by(agent_id=aid)]
     finally:
         s.close()
 
 
 @app.post("/api/clients")
-def add_client(req: ClientReq):
+def add_client(req: ClientReq, aid: str = AID):
     s = SessionLocal()
     try:
-        s.add(Client(agent_id=AGENT_ID, name=req.name, phone=req.phone, notes=req.notes))
+        s.add(Client(agent_id=aid, name=req.name, phone=req.phone, notes=req.notes))
         db.audit(s, "add_client", req.name)
         s.commit()
         return {"ok": True}
@@ -270,10 +272,10 @@ def add_client(req: ClientReq):
 
 
 @app.post("/api/clients/update")
-def update_client(req: ClientUpdateReq):
+def update_client(req: ClientUpdateReq, aid: str = AID):
     s = SessionLocal()
     try:
-        c = s.query(Client).filter_by(agent_id=AGENT_ID, name=req.orig).first()
+        c = s.query(Client).filter_by(agent_id=aid, name=req.orig).first()
         if not c:
             raise HTTPException(404)
         c.name, c.phone, c.notes = req.name, req.phone, req.notes
@@ -285,10 +287,10 @@ def update_client(req: ClientUpdateReq):
 
 
 @app.post("/api/policies")
-def add_policy(req: PolicyReq):
+def add_policy(req: PolicyReq, aid: str = AID):
     s = SessionLocal()
     try:
-        c = (s.query(Client).filter_by(agent_id=AGENT_ID)
+        c = (s.query(Client).filter_by(agent_id=aid)
              .filter(Client.name.contains(req.client)).first())
         if not c:
             return {"ok": False, "msg": f"没找到客户 {req.client}，请先新增客户"}
@@ -303,10 +305,10 @@ def add_policy(req: PolicyReq):
 
 
 @app.post("/api/policies/update")
-def update_policy(req: PolicyUpdateReq):
+def update_policy(req: PolicyUpdateReq, aid: str = AID):
     s = SessionLocal()
     try:
-        c = s.query(Client).filter_by(agent_id=AGENT_ID, name=req.client).first()
+        c = s.query(Client).filter_by(agent_id=aid, name=req.client).first()
         if not c:
             raise HTTPException(404)
         for p in c.policies:
@@ -333,7 +335,7 @@ class ProductReq(BaseModel):
 
 
 @app.get("/api/products")
-def products():
+def products(aid: str = AID):
     s = SessionLocal()
     try:
         return [dict(name=p.name, insurer=p.insurer, type=p.type, price=p.price,
@@ -344,7 +346,7 @@ def products():
 
 
 @app.post("/api/products")
-def add_product(req: ProductReq):
+def add_product(req: ProductReq, aid: str = AID):
     s = SessionLocal()
     try:
         s.add(Product(name=req.name, insurer=req.insurer or "（自填）",
@@ -368,12 +370,12 @@ class ApptReq(BaseModel):
 
 
 @app.get("/api/appointments")
-def appointments():
+def appointments(aid: str = AID):
     s = SessionLocal()
     try:
         rows = [dict(id=a.id, client=a.client, date=a.date, time=a.time,
                      purpose=a.purpose, channel=a.channel, days=db.days_until(a.date))
-                for a in s.query(Appointment).filter_by(agent_id=AGENT_ID)]
+                for a in s.query(Appointment).filter_by(agent_id=aid)]
         rows.sort(key=lambda r: (r["date"], r["time"]))
         return rows
     finally:
@@ -381,10 +383,10 @@ def appointments():
 
 
 @app.post("/api/appointments")
-def add_appointment(req: ApptReq):
+def add_appointment(req: ApptReq, aid: str = AID):
     s = SessionLocal()
     try:
-        s.add(Appointment(agent_id=AGENT_ID, client=req.client, date=req.date,
+        s.add(Appointment(agent_id=aid, client=req.client, date=req.date,
                           time=req.time or "10:00", purpose=req.purpose, channel=req.channel))
         db.audit(s, "add_appt", f"{req.client}@{req.date}")
         s.commit()
@@ -395,11 +397,11 @@ def add_appointment(req: ApptReq):
 
 # ── 续保 / 加保分析 ──────────────────────────────────────────
 @app.get("/api/renewals")
-def renewals():
+def renewals(aid: str = AID):
     s = SessionLocal()
     try:
         rows = []
-        for c in s.query(Client).filter_by(agent_id=AGENT_ID):
+        for c in s.query(Client).filter_by(agent_id=aid):
             for p in c.policies:
                 rows.append(dict(client=c.name, phone=c.phone, product=p.product,
                                  policy_no=p.policy_no, renewal=p.renewal,
@@ -415,10 +417,10 @@ class OppReq(BaseModel):
 
 
 @app.post("/api/opportunity")
-def opportunity(req: OppReq):
+def opportunity(req: OppReq, aid: str = AID):
     s = SessionLocal()
     try:
-        c = s.query(Client).filter_by(agent_id=AGENT_ID, name=req.client).first()
+        c = s.query(Client).filter_by(agent_id=aid, name=req.client).first()
         if not c:
             raise HTTPException(404)
         catalog = "\n".join(
@@ -434,5 +436,86 @@ def opportunity(req: OppReq):
         db.audit(s, "opportunity", req.client)
         s.commit()
         return dict(analysis=llm.invoke(prompt).content)
+    finally:
+        s.close()
+
+
+# ── 认证 ─────────────────────────────────────────────────────
+class AuthReq(BaseModel):
+    email: str
+    password: str
+    name: str = ""
+
+
+@app.post("/api/auth/register")
+def api_register(req: AuthReq):
+    s = SessionLocal()
+    try:
+        return auth.register(s, req.email, req.password, req.name)
+    finally:
+        s.close()
+
+
+@app.post("/api/auth/login")
+def api_login(req: AuthReq):
+    s = SessionLocal()
+    try:
+        return auth.login(s, req.email, req.password)
+    finally:
+        s.close()
+
+
+# ── 条款文档上传（PDF/TXT → 分块入库 → 参与检索）───────────────
+@app.get("/api/documents")
+def list_documents(aid: str = AID):
+    s = SessionLocal()
+    try:
+        return [dict(id=d.id, filename=d.filename, insurer=d.insurer,
+                     product=d.product, pages=d.pages, chunks=len(d.chunks))
+                for d in s.query(db.Document).filter_by(agent_id=aid)]
+    finally:
+        s.close()
+
+
+def _chunk_text(text: str, size: int = 700) -> list[str]:
+    parts, buf = [], ""
+    for para in text.replace("\r", "").split("\n"):
+        if len(buf) + len(para) > size and buf.strip():
+            parts.append(buf.strip()); buf = ""
+        buf += para + "\n"
+    if buf.strip():
+        parts.append(buf.strip())
+    return [p for p in parts if len(p) > 30]
+
+
+@app.post("/api/documents")
+async def upload_document(file: UploadFile = File(...), insurer: str = Form(""),
+                          product: str = Form(""), aid: str = AID):
+    raw = await file.read()
+    pages: list[str] = []
+    if file.filename.lower().endswith(".pdf"):
+        import io
+        from pypdf import PdfReader
+        try:
+            reader = PdfReader(io.BytesIO(raw))
+            pages = [(p.extract_text() or "") for p in reader.pages]
+        except Exception as e:
+            raise HTTPException(400, f"PDF 解析失败：{e}")
+    else:
+        pages = [raw.decode("utf-8", errors="ignore")]
+    s = SessionLocal()
+    try:
+        doc = db.Document(agent_id=aid, filename=file.filename,
+                          insurer=insurer, product=product, pages=len(pages))
+        s.add(doc); s.flush()
+        n = 0
+        for pno, ptext in enumerate(pages, 1):
+            for ch in _chunk_text(ptext):
+                s.add(db.Chunk(doc_id=doc.id, agent_id=aid, product=product,
+                               insurer=insurer, page=pno, text=ch))
+                n += 1
+        db.audit(s, "upload_doc", f"{file.filename}:{n}chunks")
+        s.commit()
+        return dict(ok=True, chunks=n, pages=len(pages))
     finally:
         s.close()

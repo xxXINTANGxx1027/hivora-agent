@@ -288,6 +288,14 @@
   .icobtn:hover{color:var(--hivora);background:var(--hivora-light)}
   @media(max-width:768px){.cal-d{min-height:48px;padding:3px 4px}
     .cal-ev{width:7px;height:7px;padding:0;border-radius:50%;font-size:0;margin:3px auto 0}}
+  #login-overlay{position:fixed;inset:0;z-index:80;background:var(--bg);
+    align-items:center;justify-content:center}
+  #login-overlay:not(.hide){display:flex}
+  .login-card{background:var(--panel);border:1px solid var(--line);border-radius:18px;
+    padding:26px 24px;width:360px;max-width:92vw;box-shadow:0 20px 60px rgba(23,35,60,.12)}
+  .doc-row{display:flex;align-items:center;gap:8px;font-size:12px;background:#fbfdff;
+    border:1px solid var(--line);border-radius:9px;padding:7px 10px;margin-bottom:6px}
+  .doc-row .meta{color:var(--dim);margin-left:auto;white-space:nowrap}
 </style>
 </head>
 <body>
@@ -311,7 +319,7 @@
     <button data-v="renewals" class="m-more"><svg class="nic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg><span class="lbl">续保管道</span><span class="badge" id="b-renew"></span></button>
   </nav>
   <button id="more-btn" onclick="toggleMore()"><svg class="nic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg><span class="lbl-s" id="more-lbl">更多</span><span class="badge" id="b-more"></span></button>
-  <div class="foot" style="margin-top:auto"><span id="foot-model">…</span> · LangGraph<br>agent_demo · PDPA 隔离</div>
+  <div class="foot" style="margin-top:auto"><span id="foot-model">…</span> · LangGraph<br><span id="foot-name"></span> · PDPA 隔离 · <a href="javascript:logout()" style="color:var(--hivora)">退出</a></div>
   <button class="btn ghost" style="width:100%" onclick="openCustomer()"><svg class="nic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg> <span class="lbl" id="cust-lbl">客户看到的 →</span></button>
 </aside>
 
@@ -369,10 +377,18 @@
           <div id="facts"></div>
         </div>
         <div class="col-foot">
-          <div class="row">
+          <div class="row" style="margin-bottom:10px">
             <input id="fact-in" placeholder="例如：CarePlus 360 月缴 RM250 起…" style="flex:1">
             <button class="btn" onclick="addFact()">教给它</button>
           </div>
+          <div id="docs"></div>
+          <div class="row">
+            <input id="doc-file" type="file" accept=".pdf,.txt" style="flex:1.4;font-size:11px">
+            <input id="doc-insurer" placeholder="保险公司" style="flex:.8">
+            <input id="doc-product" placeholder="产品名" style="flex:.8">
+            <button class="btn ghost" onclick="uploadDoc()">上传条款</button>
+          </div>
+          <div class="sub" id="doc-msg" style="margin-top:6px"></div>
         </div>
       </div>
       <div class="col">
@@ -469,6 +485,22 @@
   </div>
 </div>
 
+<div id="login-overlay" class="hide">
+  <div class="login-card">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+      <div class="logo" style="width:34px;height:34px;border-radius:9px;background:var(--hivora);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800">H</div>
+      <div><b style="font-size:16px">Hivora</b><div class="sub" style="margin:0">Insurance Agent · Stage</div></div>
+    </div>
+    <div class="mfield"><label>Email</label><input id="lg-email" type="email" placeholder="you@example.com"></div>
+    <div class="mfield" id="lg-name-w" style="display:none"><label>姓名 / Name</label><input id="lg-name"></div>
+    <div class="mfield"><label>密码 / Password</label><input id="lg-pw" type="password" placeholder="至少 6 位"></div>
+    <div class="merr" id="lg-err"></div>
+    <button class="btn" style="width:100%;margin-top:6px" id="lg-btn" onclick="doAuth()">登录 / Login</button>
+    <button class="btn ghost" style="width:100%;margin-top:8px" onclick="toggleReg()" id="lg-toggle">没有账号？注册 →</button>
+    <div class="sub" style="margin-top:12px">演示账号：demo@hivora.my / demo1234</div>
+  </div>
+</div>
+
 <button id="lang-btn" onclick="toggleLang()" aria-label="Switch language">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.9 5.7 3.9 9S14.5 18.4 12 21c-2.5-2.6-3.9-5.7-3.9-9S9.5 5.6 12 3z"/></svg>
   <span id="lang-label">EN</span>
@@ -493,7 +525,9 @@
 
 <script>
 const $=q=>document.querySelector(q);
-const api=(p,opt)=>fetch("/api/"+p,opt).then(r=>r.json());
+const TOKEN=()=>localStorage.getItem("hivora_token")||"";
+const api=(p,opt={})=>{opt.headers={...(opt.headers||{}),Authorization:"Bearer "+TOKEN()};
+  return fetch("/api/"+p,opt).then(r=>{if(r.status===401){showLogin();throw new Error("401");}return r.json();});};
 
 /* ── i18n（中/英）── */
 const I18N={
@@ -577,6 +611,25 @@ const I18N={
   route_chat:"Chat",route_action:"Action",route_fallback:"Fallback",to_human_chip:"🙋 Escalate"}
 };
 let LANG=localStorage.getItem("hivora_lang")||"zh";
+let REG=false;
+function showLogin(){$("#login-overlay").classList.remove("hide");}
+function toggleReg(){REG=!REG;$("#lg-name-w").style.display=REG?"":"none";
+  $("#lg-btn").textContent=REG?"注册 / Register":"登录 / Login";
+  $("#lg-toggle").textContent=REG?"已有账号？登录 →":"没有账号？注册 →";}
+async function doAuth(){
+  $("#lg-err").textContent="";
+  const body={email:$("#lg-email").value.trim(),password:$("#lg-pw").value,
+              name:REG?$("#lg-name").value.trim():""};
+  const r=await fetch("/api/auth/"+(REG?"register":"login"),{method:"POST",
+    headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  const j=await r.json();
+  if(!r.ok){$("#lg-err").textContent=j.detail||"失败，请重试";return;}
+  localStorage.setItem("hivora_token",j.token);
+  localStorage.setItem("hivora_name",j.name||"");
+  $("#login-overlay").classList.add("hide");
+  applyLang();
+}
+function logout(){localStorage.removeItem("hivora_token");showLogin();}
 const t=(k,n)=>{let s=(I18N[LANG][k]??I18N.zh[k]??k);return n!==undefined?s.replace("{n}",n):s;};
 function toggleLang(){LANG=LANG==="zh"?"en":"zh";localStorage.setItem("hivora_lang",LANG);applyLang();}
 function applyLang(){
@@ -729,8 +782,8 @@ function bigLine(vals,labels){
 }
 async function loadDash(){
   const d=await api("dashboard");
-  $("#dash-date").textContent=t("today")+" "+d.today+" · agent_demo";
-  $("#foot-model").textContent=d.model;
+  $("#dash-date").textContent=t("today")+" "+d.today+" · "+(localStorage.getItem("hivora_name")||"");
+  $("#foot-model").textContent=d.model;const fn=$("#foot-name");if(fn)fn.textContent=localStorage.getItem("hivora_name")||"";
   $("#dash-cards").innerHTML=
     kpiCard(t("k_clients"),d.clients,t("s_clients"),"",[1,1,2,2,3,3,d.clients],"▲ 1","up")+
     kpiCard(t("k_policies"),d.policies,t("s_policies"),"",[2,2,3,3,3,4,d.policies],"▲ 1","up")+
@@ -849,6 +902,22 @@ async function sendReply(id){
 async function loadFacts(){
   const f=await api("facts");
   $("#facts").innerHTML=f.facts.map(x=>`<div class="fact">💡 ${x}</div>`).join("");
+  const ds=await api("documents");
+  $("#docs").innerHTML=ds.map(d=>`<div class="doc-row">📄 <b>${d.filename}</b>
+    <span>${d.insurer||""} ${d.product||""}</span>
+    <span class="meta">${d.pages}页 · ${d.chunks}块</span></div>`).join("");
+}
+async function uploadDoc(){
+  const f=$("#doc-file").files[0]; if(!f){$("#doc-msg").textContent="请先选择 PDF/TXT 文件";return;}
+  const fd=new FormData();
+  fd.append("file",f);fd.append("insurer",$("#doc-insurer").value);
+  fd.append("product",$("#doc-product").value);
+  $("#doc-msg").textContent="上传解析中…";
+  const r=await fetch("/api/documents",{method:"POST",
+    headers:{Authorization:"Bearer "+TOKEN()},body:fd});
+  const j=await r.json();
+  $("#doc-msg").textContent=r.ok?`✅ 已入库：${j.pages} 页 → ${j.chunks} 个知识块，条款问答立即可用`:(j.detail||"上传失败");
+  if(r.ok){$("#doc-file").value="";loadFacts();}
 }
 async function addFact(){
   const v=$("#fact-in").value.trim(); if(!v)return;
@@ -1085,6 +1154,7 @@ async function custSend(){
 }
 $("#cust-in").addEventListener("keydown",e=>{if(e.key==="Enter")custSend()});
 
+if(!TOKEN())showLogin();
 applyLang();
 </script>
 </body>

@@ -76,7 +76,7 @@ def supervisor(state):
 
 def policy_node(state):
     q = _q(state)
-    chunks = search_policy_chunks(q)
+    chunks = search_policy_chunks(q, state["agent_id"])
     if not chunks:
         return {"messages": [("assistant",
                 "抱歉，条款库里没查到相关内容，请核对保单原文或换个问法。（绝不编造条款）")],

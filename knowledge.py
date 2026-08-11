@@ -38,7 +38,34 @@ _KWS = ["等待期", "限额", "除外", "宽限", "自杀", "残废", "保额",
 _PRODS = ["medishield", "careplus", "familyguard"]
 
 
-def search_policy_chunks(query: str, top_k: int = 4) -> list[dict]:
+def _score(query: str, product: str, text: str) -> int:
+    q_terms = set(query.lower().replace("？", " ").replace("?", " ").split())
+    t = (product + " " + text).lower()
+    score = sum(1 for x in q_terms if x and x in t)
+    score += sum(2 for kw in _KWS if kw in query and kw in text)
+    score += sum(3 for p in _PRODS if p in query.lower() and p in product.lower())
+    return score
+
+
+def search_policy_chunks(query: str, agent_id: str = "", top_k: int = 4) -> list[dict]:
+    """内置示例条款 + 该代理人自己上传的文档，合并按相关度排序。"""
+    import db
+    cands = list(POLICY_CHUNKS)
+    if agent_id:
+        s = db.SessionLocal()
+        try:
+            for c in s.query(db.Chunk).filter_by(agent_id=agent_id).all():
+                cands.append(dict(insurer=c.insurer or "上传文档",
+                                  product=c.product or (c.document.filename if c.document else ""),
+                                  page=c.page, text=c.text))
+        finally:
+            s.close()
+    scored = [(sc, c) for c in cands if (sc := _score(query, c["product"], c["text"])) > 0]
+    scored.sort(key=lambda x: -x[0])
+    return [c for _, c in scored[:top_k]]
+
+
+def _old_search(query: str, top_k: int = 4) -> list[dict]:
     q_terms = set(query.lower().replace("？", " ").replace("?", " ").split())
     scored = []
     for c in POLICY_CHUNKS:
