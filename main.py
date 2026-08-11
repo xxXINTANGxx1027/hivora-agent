@@ -238,6 +238,24 @@ def dashboard(aid: str = AID):
         s.close()
 
 
+@app.get("/api/onboarding")
+def onboarding(aid: str = AID):
+    """新账号是空的，前四步决定他会不会留下来。"""
+    s = SessionLocal()
+    try:
+        docs = db.live(s.query(db.Document), db.Document).filter_by(agent_id=aid).count()
+        prods = s.query(Product).filter_by(agent_id=aid).count()
+        tg = s.query(db.TelegramBot).filter_by(agent_id=aid).first() is not None
+        clients = db.live(s.query(Client), Client).filter_by(agent_id=aid).count()
+        steps = [dict(key="docs", done=docs > 0, count=docs),
+                 dict(key="products", done=prods > 0, count=prods),
+                 dict(key="telegram", done=tg, count=1 if tg else 0),
+                 dict(key="clients", done=clients > 0, count=clients)]
+        return dict(steps=steps, done=all(x["done"] for x in steps))
+    finally:
+        s.close()
+
+
 # ── 收件箱 ────────────────────────────────────────────────────
 @app.get("/api/inbox")
 def inbox(aid: str = AID):
@@ -1156,6 +1174,32 @@ def admin_settings(_: str = ADM):
                 login_url=email_out.LOGIN_URL,
                 telegram_ready=bool(os.environ.get("PUBLIC_BASE_URL")),
                 version=VERSION)
+
+
+class TestMailReq(BaseModel):
+    to: str
+
+
+@app.post("/api/admin/email/test")
+def admin_test_email(req: TestMailReq, adm: str = ADM):
+    """配完 SMTP 用它验一下，不用为了试邮件去建个真账号。"""
+    if not email_out.configured():
+        raise HTTPException(400, "还没配 SMTP（SMTP_HOST / SMTP_FROM）")
+    to = req.to.strip()
+    if "@" not in to:
+        raise HTTPException(400, "收件地址不对")
+    ok = email_out.send(to, "Hivora 邮件配置测试",
+                        "能看到这封信，说明 SMTP 配好了。\n\n"
+                        "之后管理员创建账号时，代理人会自动收到开通信。\n\n—— Hivora")
+    s = SessionLocal()
+    try:
+        db.audit(s, adm, "test_email", f"{to}:{'sent' if ok else 'failed'}")
+        s.commit()
+    finally:
+        s.close()
+    if not ok:
+        raise HTTPException(502, "发送失败，检查 SMTP_HOST / 端口 / 账号密码，详见服务端日志")
+    return {"ok": True}
 
 
 @app.get("/api/admin/audit")

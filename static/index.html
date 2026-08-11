@@ -32,6 +32,22 @@
              color:var(--text);cursor:pointer;text-align:left}
   nav button:hover{background:var(--hivora-light)}
   nav button.on{background:var(--hivora-light);color:var(--hivora-dark);font-weight:600}
+  /* 开通引导 */
+  #onboard:empty{display:none}
+  .ob{background:var(--panel);border:1px solid var(--hivora);border-radius:13px;
+      padding:18px 20px;margin-bottom:18px}
+  .ob h3{font-size:15px;margin-bottom:3px}
+  .ob .sub{margin-bottom:14px}
+  .ob-steps{display:grid;gap:9px;grid-template-columns:repeat(auto-fit,minmax(215px,1fr))}
+  .ob-step{display:flex;align-items:center;gap:10px;padding:10px 12px;
+    border:1px solid var(--line);border-radius:10px;background:var(--bg)}
+  .ob-step.on{background:#e6f6f0;border-color:var(--green)}
+  .ob-n{width:20px;height:20px;border-radius:50%;background:var(--hivora);color:#fff;
+    font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;
+    flex-shrink:0}
+  .ob-step.on .ob-n{background:var(--green)}
+  .ob-t{font-size:12.5px;flex:1;line-height:1.4}
+  .ob-step .btn{padding:4px 10px;font-size:11px}
   .badge:empty{display:none}   /* 没数字就别显示，否则是个空红条 */
   .badge{margin-left:auto;background:var(--red);color:#fff;font-size:10px;
          border-radius:99px;padding:1px 7px}
@@ -344,6 +360,7 @@
 <main>
   <!-- 总览 -->
   <section id="v-dash">
+    <div id="onboard"></div>
     <h1>今日总览</h1><div class="sub" id="dash-date"></div>
     <div class="cards" id="dash-cards"></div>
     <div class="grid2a">
@@ -594,6 +611,10 @@ const I18N={
  zh:{nav_biz:"经营",nav_ai:"AI HIVORA",nav_work:"展业",dash:"总览",inbox:"客户对话",
   train:"训练 & 问 Hivora",clients:"客户数据库",products:"产品目录",calendar:"预约日历",
   renewals:"续保管道",cust_view:"客户看到的 →",p_portfolio:"保单组合",p_trend:"近 7 天 AI 活跃度",p_activity:"本周动态明细",th_time:"时间",th_type:"类型",th_detail:"详情",ty_msg:"消息",ty_renewal:"续保",ty_appt:"预约",pf_month:"月保费",pf_active:"在保保单",handled:"AI 已答占比",drafts:"生成草稿",actions:"AI 录入",n_dash:"总览",n_inbox:"对话",n_train:"训练",n_clients:"客户",more:"更多",
+  ob_title:"把它变成你自己的助手",ob_sub:"账号刚开通是空的。走完这四步，Hivora 才知道你卖什么、服务谁。",
+  ob_docs:"上传条款 PDF —— 之后问条款会带出处",ob_products:"加你常卖的产品",
+  ob_telegram:"连接 Telegram —— 客户找你直接进收件箱",ob_clients:"加第一个客户",
+  ob_go:"去做",
   dash_t:"今日总览",inbox_t:"客户对话",inbox_s:"客户 Telegram 消息 → AI 草拟 → 你确认后发送（AI 不直接面对客户）",
   train_t:"训练 & 问 Hivora",train_s:"左边教它（像教新员工）· 右边实时预览效果",
   clients_t:"客户数据库",clients_s:"你自己的 client book（按代理人隔离）· 也可以直接对 Hivora 说「帮我加客户 Ahmad，电话 012-3456789」",
@@ -636,6 +657,10 @@ const I18N={
  en:{nav_biz:"BUSINESS",nav_ai:"AI HIVORA",nav_work:"SALES",dash:"Overview",inbox:"Client Chats",
   train:"Train & Ask Hivora",clients:"Client Database",products:"Products",calendar:"Calendar",
   renewals:"Renewals",cust_view:"Customer view →",p_portfolio:"Portfolio",p_trend:"AI Activity (7 days)",p_activity:"Weekly Activity",th_time:"Time",th_type:"Type",th_detail:"Detail",ty_msg:"Message",ty_renewal:"Renewal",ty_appt:"Appt",pf_month:"premium /mo",pf_active:"Active policies",handled:"AI answered",drafts:"Drafts",actions:"AI entries",n_dash:"Home",n_inbox:"Chats",n_train:"Train",n_clients:"Clients",more:"More",
+  ob_title:"Make it yours",ob_sub:"A new account starts empty. These four steps teach Hivora what you sell and who you serve.",
+  ob_docs:"Upload a policy PDF — answers will cite it",ob_products:"Add the products you sell",
+  ob_telegram:"Connect Telegram — clients reach your inbox",ob_clients:"Add your first client",
+  ob_go:"Do it",
   dash_t:"Today's Overview",inbox_t:"Client Chats",inbox_s:"Client Telegram message → AI drafts → you confirm & send (AI never talks to clients directly)",
   train_t:"Train & Ask Hivora",train_s:"Teach it on the left (like a new hire) · live preview on the right",
   clients_t:"Client Database",clients_s:"Your own client book (isolated per agent) · or just tell Hivora \"Add client Ahmad, phone 012-3456789\"",
@@ -873,7 +898,30 @@ function bigLine(vals,labels){
       style="font-size:11px;font-weight:700" fill="var(--hivora)">${vals[vals.length-1]}%</text>
     ${xlab}</svg>`;
 }
+const OB_STEPS=[
+  {key:"docs",     go:()=>{goView("train");}},
+  {key:"products", go:()=>{goView("products");openModal("product");}},
+  {key:"telegram", go:()=>{goView("train");openTg();}},
+  {key:"clients",  go:()=>{goView("clients");openModal("client");}},
+];
+async function loadOnboard(){
+  let o; try{o=await api("onboarding");}catch(e){return;}
+  const box=$("#onboard");
+  if(o.done){box.innerHTML="";return;}
+  box.innerHTML=`<div class="ob">
+    <h3>${t("ob_title")}</h3>
+    <div class="sub">${t("ob_sub")}</div>
+    <div class="ob-steps">${o.steps.map((st,i)=>`
+      <div class="ob-step ${st.done?"on":""}">
+        <span class="ob-n">${st.done?"✓":i+1}</span>
+        <span class="ob-t">${t("ob_"+st.key)}${st.done&&st.count?` · ${esc(st.count)}`:""}</span>
+        ${st.done?"":`<button class="btn" onclick="obGo(${i})">${t("ob_go")}</button>`}
+      </div>`).join("")}</div></div>`;
+}
+function obGo(i){(OB_STEPS[i]||{}).go?.();}
+
 async function loadDash(){
+  loadOnboard();
   const d=await api("dashboard");
   $("#dash-date").textContent=t("today")+" "+d.today+" · "+(localStorage.getItem("hivora_name")||"");
   $("#foot-model").textContent=d.model;const fn=$("#foot-name");if(fn)fn.textContent=localStorage.getItem("hivora_name")||"";

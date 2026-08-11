@@ -25,6 +25,29 @@ V0.1 全部推上生产并验证过：客户端已无管理代码、后端 build
 
 ---
 
+## 📧 邮件怎么配（5 分钟）
+
+最快的路是 Gmail 应用专用密码 —— 免费、当天能用，前几十个账号足够。
+等买了 `hivora.my` 域名再换 Resend 之类的，发件人才能是 `no-reply@hivora.my`。
+
+1. Google 账号 → 安全性 → **开启两步验证**（不开就没有应用专用密码这个选项）
+2. 搜「应用专用密码」→ 生成 → 得到 16 位，**去掉空格**
+3. Render Environment 加：
+   ```
+   SMTP_HOST     = smtp.gmail.com
+   SMTP_PORT     = 587
+   SMTP_USER     = xintang092@gmail.com
+   SMTP_PASSWORD = <16 位应用专用密码>
+   SMTP_FROM     = Hivora <xintang092@gmail.com>
+   APP_LOGIN_URL = https://hivora-frontend.vercel.app
+   ```
+4. 管理站点右上角 **✉️ 发测试邮件**，收到就成了
+
+> ⚠️ `SMTP_FROM` 的邮箱必须和 `SMTP_USER` 一致 —— Gmail 不允许用别的地址发信，
+> 填了会被改写或直接拒收。
+
+---
+
 ## P0 · 发第一个付费账号之前
 
 - [ ] **Render 加 `PUBLIC_BASE_URL`** · 你来 · 2 分钟
@@ -55,9 +78,9 @@ V0.1 全部推上生产并验证过：客户端已无管理代码、后端 build
       SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASSWORD / SMTP_FROM
       ```
 
-- [ ] **开通引导**（WP-2）· 我来 · 半天
-      「账号是空的全靠自己弄」是最大的流失点。新账号第一屏给四步清单：
-      上传条款 → 加产品 → 连 Telegram → 加第一个客户。
+- [x] ~~**开通引导**（WP-2）· 已完成~~
+      新账号「总览」第一屏是四步进度卡，每步一个直达按钮，全部完成后自动消失。
+      跟开通信里写的四步对得上。
 
 ---
 
@@ -127,4 +150,4 @@ token 过期 + 停用即失效 · 生产守卫（弱配置拒绝启动）· 前�
 LLM 超时/重试/并发闸门 · SSE 流式输出 · 管理站拆成独立站点 · 重置密码 / 套餐到期 /
 审计日志 UI · token 用量与成本 + 月度配额 · 可观测性（request id / readyz / Sentry 钩子）·
 备份脚本 + 每日工作流 + [RUNBOOK.md](RUNBOOK.md) · Telegram 客户渠道 + 代理人助手 ·
-线索标识 + 一键转客户 · 130 个测试 + 三个 CI job · 开通邮件 · `push.sh` 一键发布并验证
+线索标识 + 一键转客户 · 139 个测试 + 三个 CI job · 开通邮件 + 开通引导 · `push.sh` 一键发布并验证

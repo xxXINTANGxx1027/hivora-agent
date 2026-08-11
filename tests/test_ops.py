@@ -324,3 +324,69 @@ def test_push_script_exists_and_is_runnable():
     assert "sync-frontend.sh" in body and "--check" in body, "push.sh 应该校验前端同步"
     assert "pytest" in body, "push.sh 应该在推之前跑测试"
     assert "read -r -p" in body, "推生产之前应该要确认一次"
+
+
+# ── 开通引导 ──────────────────────────────────────────────────
+def test_new_account_sees_four_unfinished_steps(app_client, agent_factory):
+    tok, _ = agent_factory()
+    o = app_client.get("/api/onboarding", headers=H(tok)).json()
+    assert [s["key"] for s in o["steps"]] == ["docs", "products", "telegram", "clients"]
+    assert all(s["done"] is False for s in o["steps"])
+    assert o["done"] is False
+
+
+def test_steps_tick_off_as_the_agent_sets_up(app_client, agent_factory):
+    tok, _ = agent_factory()
+    step = lambda k: next(s for s in app_client.get("/api/onboarding", headers=H(tok))
+                          .json()["steps"] if s["key"] == k)
+
+    app_client.post("/api/clients", headers=H(tok), json={"name": "第一个客户"})
+    assert step("clients")["done"] is True and step("clients")["count"] == 1
+    assert step("products")["done"] is False
+
+    app_client.post("/api/products", headers=H(tok), json={"name": "MediShield"})
+    assert step("products")["done"] is True
+
+    app_client.post("/api/documents", headers=H(tok),
+                    files={"file": ("terms.txt", "条款内容" * 20, "text/plain")})
+    assert step("docs")["done"] is True
+
+    o = app_client.get("/api/onboarding", headers=H(tok)).json()
+    assert o["done"] is False, "还没连 Telegram 就不该算完成"
+
+
+def test_onboarding_disappears_once_everything_is_done(app_client, agent_factory,
+                                                       monkeypatch):
+    import telegram
+    monkeypatch.setattr(telegram, "call",
+                        lambda token, method, payload=None:
+                            {"username": "bot"} if method == "getMe" else {})
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://api.example.com")
+    tok, _ = agent_factory()
+    app_client.post("/api/clients", headers=H(tok), json={"name": "客户"})
+    app_client.post("/api/products", headers=H(tok), json={"name": "产品"})
+    app_client.post("/api/documents", headers=H(tok),
+                    files={"file": ("t.txt", "条款" * 30, "text/plain")})
+    app_client.post("/api/telegram/connect", headers=H(tok), json={"token": "111:AAA"})
+
+    assert app_client.get("/api/onboarding", headers=H(tok)).json()["done"] is True
+
+
+def test_onboarding_is_per_agent(app_client, agent_factory):
+    a, _ = agent_factory()
+    b, _ = agent_factory()
+    app_client.post("/api/clients", headers=H(a), json={"name": "A 的客户"})
+    step_b = next(s for s in app_client.get("/api/onboarding", headers=H(b))
+                  .json()["steps"] if s["key"] == "clients")
+    assert step_b["done"] is False
+
+
+def test_deleted_data_reopens_the_step(app_client, agent_factory):
+    """把唯一的客户删掉，这一步该退回未完成 —— 引导要反映真实状态。"""
+    tok, _ = agent_factory()
+    app_client.post("/api/clients", headers=H(tok), json={"name": "会被删"})
+    cid = app_client.get("/api/clients", headers=H(tok)).json()[0]["id"]
+    app_client.post("/api/delete", headers=H(tok), json={"kind": "client", "id": cid})
+    step = next(s for s in app_client.get("/api/onboarding", headers=H(tok))
+                .json()["steps"] if s["key"] == "clients")
+    assert step["done"] is False

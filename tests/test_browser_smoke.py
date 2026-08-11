@@ -152,6 +152,38 @@ def test_telegram_panel_opens_and_shows_setup(live_server, page, agent_factory):
     _assert_no_js_errors(page)
 
 
+def test_new_account_sees_the_onboarding_card(live_server, page, agent_factory):
+    """新账号第一屏必须有引导 —— 登进来一片空白是最大的流失点。"""
+    _, email = agent_factory()
+    _login(page, live_server, email, "Agent-Pass-2026")
+    page.wait_for_selector("#onboard .ob", timeout=10000)
+    assert page.locator("#onboard .ob-step").count() == 4
+
+    # 点某一步要能跳到对应页面
+    page.click('#onboard .ob-step:nth-child(3) button')     # 连接 Telegram
+    page.wait_for_selector("#tg-overlay:not(.hide)", timeout=10000)
+    page.click("#tg-overlay >> text=关闭")
+    page.wait_for_selector("#tg-overlay", state="hidden", timeout=10000)
+    _assert_nothing_covers_the_page(page)
+    _assert_no_js_errors(page)
+
+
+def test_onboarding_ticks_off_and_then_disappears(live_server, page, agent_factory,
+                                                  app_client):
+    """完成一步该变勾；全部完成后整张卡片消失，不留空壳。"""
+    from conftest import H
+    tok, email = agent_factory()
+    _login(page, live_server, email, "Agent-Pass-2026")
+    page.wait_for_selector("#onboard .ob", timeout=10000)
+    assert page.locator("#onboard .ob-step.on").count() == 0
+
+    app_client.post("/api/clients", headers=H(tok), json={"name": "浏览器客户"})
+    page.reload(wait_until="load")
+    page.wait_for_selector("#onboard .ob-step.on", timeout=10000)
+    assert page.locator("#onboard .ob-step.on").count() == 1
+    _assert_no_js_errors(page)
+
+
 def test_client_app_has_no_admin_ui(live_server, page, agent_factory):
     """代理人界面里不该出现任何管理入口。"""
     _, email = agent_factory()

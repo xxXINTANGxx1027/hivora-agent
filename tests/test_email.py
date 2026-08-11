@@ -178,3 +178,35 @@ def test_settings_tells_the_admin_console_what_is_configured(app_client, admin_t
 def test_settings_requires_admin(app_client, agent_factory):
     tok, _ = agent_factory()
     assert app_client.get("/api/admin/settings", headers=H(tok)).status_code == 403
+
+
+# ── 测试邮件（配完 SMTP 用来验）────────────────────────────────
+def test_admin_can_send_a_test_email(app_client, admin_token, smtp):
+    r = app_client.post("/api/admin/email/test", headers=H(admin_token),
+                        json={"to": "me@test.local"})
+    assert r.status_code == 200
+    mail = [x for x in smtp.sent if "to" in x][-1]
+    assert mail["to"] == "me@test.local" and "配置测试" in mail["subject"]
+
+
+def test_test_email_without_smtp_says_so(app_client, admin_token, no_smtp):
+    r = app_client.post("/api/admin/email/test", headers=H(admin_token),
+                        json={"to": "me@test.local"})
+    assert r.status_code == 400 and "SMTP" in r.json()["detail"]
+
+
+def test_test_email_reports_send_failure(app_client, admin_token, monkeypatch):
+    import email_out
+    monkeypatch.setattr(email_out, "HOST", "smtp.example.com")
+    monkeypatch.setattr(email_out, "FROM", "bot@hivora.my")
+    monkeypatch.setattr(email_out.smtplib, "SMTP",
+                        lambda *a, **kw: (_ for _ in ()).throw(OSError("refused")))
+    r = app_client.post("/api/admin/email/test", headers=H(admin_token),
+                        json={"to": "me@test.local"})
+    assert r.status_code == 502 and "SMTP_HOST" in r.json()["detail"]
+
+
+def test_test_email_requires_admin(app_client, agent_factory):
+    tok, _ = agent_factory()
+    assert app_client.post("/api/admin/email/test", headers=H(tok),
+                           json={"to": "x@y.z"}).status_code == 403
