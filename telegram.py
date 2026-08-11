@@ -1,14 +1,21 @@
-"""Telegram 入口 —— 代理人在自己的 bot 里用 Hivora。
+"""Telegram 入口 —— 客户的消息渠道 + 代理人自己的助手，共用一个 bot。
 
-每个代理人自己去 BotFather 建一个 bot，把 token 填进 Hivora。这样：
-- 客户/代理人看到的是他自己品牌的 bot
-- 你不用替任何人保管 token
-- 多租户天然隔离：一个 bot 只服务一个 agent_id
+每个代理人自己去 BotFather 建 bot，把 token 填进 Hivora。客户看到的是他自己
+品牌的 bot；你不用替任何人保管 token；一个 bot 只服务一个 agent_id，
+多租户天然隔离。
+
+同一个 bot 服务两种人，靠有没有绑过码来分：
+
+    绑过绑定码  → 代理人本人。提问走 ask()，当私人助手用
+    没绑过      → 客户。消息进收件箱，代理人确认后才回复
+
+**AI 绝不自动回复客户。** 客户只会收到一句写死的回执，剩下的等代理人在
+Hivora 里确认。这是合规红线，也是这个产品本身的卖点。
 
 安全上有三道：
 1. token 用 Fernet 加密存，接口只回最后 4 位，永不明文回传
 2. webhook 路径带随机片段，且校验 Telegram 的 secret header
-3. 只有绑过的 chat_id 才会得到回答 —— bot 链接被转发出去也没用
+3. 绑定码一次性、10 分钟过期，且只认自己 bot 的码
 """
 from __future__ import annotations
 
@@ -173,6 +180,12 @@ def unlink_chat(s, agent_id: str, row_id: int):
 
 
 # ── 收到消息 ──────────────────────────────────────────────────
+# 客户第一次来时的固定回执。**写死的文案，不是 AI 生成**——
+# 合规红线：AI 绝不直接面对客户。
+CUSTOMER_ACK = os.environ.get(
+    "TELEGRAM_CUSTOMER_ACK",
+    "已收到你的消息，我会尽快回复你 🙏")
+
 HELP = ("我是你的 Hivora 助手。直接问就行：\n"
         "· 张伟明有哪些保单？\n"
         "· MediShield 的等待期多久？\n"
@@ -197,6 +210,52 @@ def _bind(s, agent_id_of_bot: str, code: str, chat_id: str, name: str) -> str:
     db.audit(s, row.agent_id, "tg_bind", f"chat={chat_id} {name}")
     s.commit()
     return "✅ 绑定成功。\n\n" + HELP
+
+
+def notify_agent(s, agent_id: str, token: str, text: str):
+    """把提醒推给代理人已绑定的所有设备。"""
+    for c in s.query(db.TelegramChat).filter_by(agent_id=agent_id).all():
+        send(token, c.chat_id, text)
+
+
+def _customer_message(s, bot, chat_id: str, name: str, text: str) -> None:
+    """客户发来的消息：只存进收件箱 + 提醒代理人。
+
+    **绝不在这里调 AI 回复客户。** 产品设计就是 AI 起草、代理人确认后再发，
+    这既是合规红线（AGENTS.md 铁律 2），也是这个产品的卖点本身。
+    """
+    ts = dt.datetime.now().strftime("%H:%M")
+    t = (s.query(db.Thread)
+         .filter_by(agent_id=bot.agent_id, tg_chat_id=chat_id).first())
+    first = t is None
+    if first:
+        t = db.Thread(agent_id=bot.agent_id, client=name or f"TG {chat_id}",
+                      lang="中文", channel="telegram", tg_chat_id=chat_id,
+                      status="pending", unread=0)
+        s.add(t)
+        s.flush()
+    s.add(db.Message(thread_id=t.id, role="customer", text=text[:4000], ts=ts))
+    t.status, t.suggestions = "pending", "[]"
+    t.unread = (t.unread or 0) + 1
+    if name and t.client.startswith("TG "):
+        t.client = name
+    db.audit(s, bot.agent_id, "tg_customer_msg", f"chat={chat_id} {text[:60]}")
+    s.commit()
+
+    token = decrypt(bot.token_enc)
+    if first:
+        send(token, chat_id, CUSTOMER_ACK)
+    notify_agent(s, bot.agent_id, token,
+                 f"💬 {t.client}：{text[:120]}\n\n到 Hivora 收件箱确认后回复。")
+
+
+def send_to_chat(s, agent_id: str, chat_id: str, text: str) -> bool:
+    """代理人在网页上发的回复 → 真的发到客户的 Telegram。"""
+    bot = s.query(db.TelegramBot).filter_by(agent_id=agent_id).first()
+    if not bot or not chat_id:
+        return False
+    send(decrypt(bot.token_enc), chat_id, text)
+    return True
 
 
 def handle_update(s, path_secret: str, header_secret: str, update: dict) -> None:
@@ -225,19 +284,24 @@ def handle_update(s, path_secret: str, header_secret: str, update: dict) -> None
     # /start <code> 或直接发绑定码
     if text.startswith("/start"):
         code = text[6:].strip()
-        send(token, chat_id,
-             _bind(s, bot.agent_id, code, chat_id, name) if code
-             else "请在 Hivora 网页版点「连接 Telegram」拿绑定码，然后发给我。")
+        if code:
+            send(token, chat_id, _bind(s, bot.agent_id, code, chat_id, name))
+        else:
+            # 客户点 Start 时也会走到这里——给固定欢迎语，别提绑定码
+            already = (s.query(db.TelegramChat)
+                       .filter_by(agent_id=bot.agent_id, chat_id=chat_id).first())
+            send(token, chat_id, HELP if already else CUSTOMER_ACK)
         return
 
+    # 同一个 bot 服务两种人：绑过码的是代理人本人（助手模式），
+    # 其余一律当客户（消息进收件箱，等代理人确认后回复）。
     linked = (s.query(db.TelegramChat)
               .filter_by(agent_id=bot.agent_id, chat_id=chat_id).first())
     if not linked:
-        if text.upper().startswith("HV"):
+        if text.upper().startswith("HV") and len(text.strip()) <= 10:
             send(token, chat_id, _bind(s, bot.agent_id, text, chat_id, name))
         else:
-            send(token, chat_id,
-                 "这台设备还没绑定。到 Hivora 网页版点「连接 Telegram」拿绑定码发给我。")
+            _customer_message(s, bot, chat_id, name, text)
         return
 
     if text == "/unlink":

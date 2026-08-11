@@ -95,6 +95,8 @@ class Thread(Base):
     mode = Column(String(8), default="ai")           # ai/human
     unread = Column(Integer, default=0)
     suggestions = Column(Text, default="[]")         # JSON list
+    channel = Column(String(16), default="manual")   # manual / telegram
+    tg_chat_id = Column(String(32), index=True, default="")
     messages = relationship("Message", cascade="all,delete", backref="thread",
                             order_by="Message.id")
 
@@ -419,6 +421,8 @@ def migrate_columns():
             "ALTER TABLE facts ADD COLUMN deleted VARCHAR(24) DEFAULT ''",
             "ALTER TABLE documents ADD COLUMN deleted VARCHAR(24) DEFAULT ''",
             "ALTER TABLE agents ADD COLUMN token_quota INTEGER DEFAULT 0",
+            "ALTER TABLE threads ADD COLUMN channel VARCHAR(16) DEFAULT 'manual'",
+            "ALTER TABLE threads ADD COLUMN tg_chat_id VARCHAR(32) DEFAULT ''",
         ]:
             try:
                 conn.execute(text(ddl))

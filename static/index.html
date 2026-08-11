@@ -364,7 +364,7 @@
   <!-- 客户对话 -->
   <section id="v-inbox" class="hide">
     <h1>客户对话</h1>
-    <div class="sub">客户 WhatsApp 消息 → AI 草拟 → 你确认后发送（AI 不直接面对客户）</div>
+    <div class="sub">客户 Telegram 消息 → AI 草拟 → 你确认后发送（AI 不直接面对客户）</div>
     <div class="split">
       <div class="list" id="inbox-list"></div>
       <div class="thread" id="thread">
@@ -570,7 +570,8 @@
 <script>
 const $=q=>document.querySelector(q);
 /* 所有来自服务端的数据（客户名/消息正文/文件名/LLM 输出）进 innerHTML 前必须过 esc()。
-   客户在 WhatsApp 里发一句 <img onerror=...> 就能偷走 localStorage 里的 token。 */
+   客户在 Telegram 里发一句 <img onerror=...>，代理人一打开收件箱就中招——
+   现在客户消息是真的从外网进来的，这条比以前更要紧。 */
 const ESCMAP={"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"};
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>ESCMAP[c]);
 const API_BASE=(document.querySelector('meta[name="hivora-api"]')?.content||"")
@@ -592,7 +593,7 @@ const I18N={
  zh:{nav_biz:"经营",nav_ai:"AI HIVORA",nav_work:"展业",dash:"总览",inbox:"客户对话",
   train:"训练 & 问 Hivora",clients:"客户数据库",products:"产品目录",calendar:"预约日历",
   renewals:"续保管道",cust_view:"客户看到的 →",p_portfolio:"保单组合",p_trend:"近 7 天 AI 活跃度",p_activity:"本周动态明细",th_time:"时间",th_type:"类型",th_detail:"详情",ty_msg:"消息",ty_renewal:"续保",ty_appt:"预约",pf_month:"月保费",pf_active:"在保保单",handled:"AI 已答占比",drafts:"生成草稿",actions:"AI 录入",n_dash:"总览",n_inbox:"对话",n_train:"训练",n_clients:"客户",more:"更多",
-  dash_t:"今日总览",inbox_t:"客户对话",inbox_s:"客户 WhatsApp 消息 → AI 草拟 → 你确认后发送（AI 不直接面对客户）",
+  dash_t:"今日总览",inbox_t:"客户对话",inbox_s:"客户 Telegram 消息 → AI 草拟 → 你确认后发送（AI 不直接面对客户）",
   train_t:"训练 & 问 Hivora",train_s:"左边教它（像教新员工）· 右边实时预览效果",
   clients_t:"客户数据库",clients_s:"你自己的 client book（按代理人隔离）· 也可以直接对 Hivora 说「帮我加客户 Ahmad，电话 012-3456789」",
   products_t:"产品目录",products_s:"各产品价格与内容一览（条款细节问 Hivora，带出处）· 也可以直接对 Hivora 说「帮我加产品 XX」",
@@ -613,6 +614,7 @@ const I18N={
   suggest3:"✨ 建议回复 ×3",to_human:"🙋 转人工处理",human_on:"🙋 人工处理中 · AI 已退出",
   back_ai:"🤖 恢复 AI 协助",human:"人工",sent_note:"✅ 已回复。客户再来消息会出现在这里。",
   pick_thread:"← 选择一个对话",reply_ph:"自己写，或点上面的建议回复填入…",
+  tg_thread:"✈️ Telegram",tg_sent:"✅ 已发到客户的 Telegram",
   reply_ph_human:"人工回复…",sugg_pick:"点击填入",sugg_styles:["💼 专业详细","😊 亲切热情","⚡ 简短快捷"],
   suggesting:"Hivora 生成 3 条建议中",thinking:"Hivora 思考中",analyzing:"Hivora 分析中",
   opp_btn:"✨ 加保机会分析",opp_cap:"✨ 加保机会（仅供参考）",
@@ -631,7 +633,7 @@ const I18N={
  en:{nav_biz:"BUSINESS",nav_ai:"AI HIVORA",nav_work:"SALES",dash:"Overview",inbox:"Client Chats",
   train:"Train & Ask Hivora",clients:"Client Database",products:"Products",calendar:"Calendar",
   renewals:"Renewals",cust_view:"Customer view →",p_portfolio:"Portfolio",p_trend:"AI Activity (7 days)",p_activity:"Weekly Activity",th_time:"Time",th_type:"Type",th_detail:"Detail",ty_msg:"Message",ty_renewal:"Renewal",ty_appt:"Appt",pf_month:"premium /mo",pf_active:"Active policies",handled:"AI answered",drafts:"Drafts",actions:"AI entries",n_dash:"Home",n_inbox:"Chats",n_train:"Train",n_clients:"Clients",more:"More",
-  dash_t:"Today's Overview",inbox_t:"Client Chats",inbox_s:"Client WhatsApp message → AI drafts → you confirm & send (AI never talks to clients directly)",
+  dash_t:"Today's Overview",inbox_t:"Client Chats",inbox_s:"Client Telegram message → AI drafts → you confirm & send (AI never talks to clients directly)",
   train_t:"Train & Ask Hivora",train_s:"Teach it on the left (like a new hire) · live preview on the right",
   clients_t:"Client Database",clients_s:"Your own client book (isolated per agent) · or just tell Hivora \"Add client Ahmad, phone 012-3456789\"",
   products_t:"Product Catalog",products_s:"Prices & coverage at a glance (ask Hivora for policy details, with citations) · or tell Hivora \"Add product XX\"",
@@ -652,6 +654,7 @@ const I18N={
   suggest3:"✨ Suggest ×3",to_human:"🙋 Take over",human_on:"🙋 Human mode · AI paused",
   back_ai:"🤖 Resume AI",human:"Human",sent_note:"✅ Replied. New client messages will appear here.",
   pick_thread:"← Pick a conversation",reply_ph:"Type your reply, or click a suggestion above…",
+  tg_thread:"✈️ Telegram",tg_sent:"✅ Sent to the client on Telegram",
   reply_ph_human:"Reply manually…",sugg_pick:"click to use",sugg_styles:["💼 Professional","😊 Friendly","⚡ Short & quick"],
   suggesting:"Hivora is drafting 3 suggestions",thinking:"Hivora is thinking",analyzing:"Hivora is analyzing",
   opp_btn:"✨ Upsell Analysis",opp_cap:"✨ Upsell opportunities (for reference)",
@@ -924,7 +927,7 @@ async function loadInbox(){
   const ts=await api("inbox");
   $("#inbox-list").innerHTML=ts.map(th=>`
     <div class="titem ${curThread===th.id?"on":""}" onclick="openThread(${th.id})">
-      <b>${esc(th.client)}</b> ${th.unread?`<span class="badge">${esc(th.unread)}</span>`:""}
+      <b>${esc(th.client)}</b> ${th.channel==="telegram"?`<span class="pill blue" style="font-size:9px;padding:1px 6px">✈️</span>`:""}${th.unread?`<span class="badge">${esc(th.unread)}</span>`:""}
       <div class="p">${esc(th.last)}</div>
       <span class="pill ${th.status==="sent"?"ok":th.status==="drafted"?"blue":"warn"}">
         ${{pending:t("st_pending"),drafted:t("st_drafted"),sent:t("st_sent")}[th.status]}</span>
@@ -947,6 +950,7 @@ async function openThread(id){
        </div>${suggHTML}`;
   $("#thread").innerHTML=`
     <div class="thr-head">💬 ${esc(th.client)}
+      ${th.channel==="telegram"?`<span class="pill blue">${t("tg_thread")}</span>`:""}
       <span class="pill blue" style="margin-left:auto">${esc(th.lang)}</span>
       ${human?`<span class="pill due">${t("human")}</span>`:''}</div>
     <div class="thr-msgs">${th.messages.map(m=>
@@ -979,8 +983,13 @@ async function setMode(id,mode){
 }
 async function sendReply(id){
   const v=$("#reply-text").value.trim(); if(!v)return;
-  await post("inbox/"+id+"/send",{text:v});
-  openThread(id); loadDash();
+  const r=await post("inbox/"+id+"/send",{text:v});
+  await openThread(id); loadDash();
+  if(r.delivered){
+    const f=$("#thr-foot");
+    if(f)f.insertAdjacentHTML("afterbegin",
+      `<div class="sub" style="color:var(--green);margin-bottom:6px">${t("tg_sent")}</div>`);
+  }
 }
 
 /* ── 训练 ── */

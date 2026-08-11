@@ -90,9 +90,9 @@ def test_connect_needs_public_base_url(app_client, agent_factory, fake_tg, monke
     assert r.status_code == 400 and "PUBLIC_BASE_URL" in r.json()["detail"]
 
 
-# ── 绑定 ──────────────────────────────────────────────────────
-def test_unbound_chat_gets_no_answers(app_client, agent_factory, fake_tg):
-    """bot 链接被转发出去也没用 —— 没绑过就不回答任何业务问题。"""
+# ── 客户渠道 ──────────────────────────────────────────────────
+def test_customer_message_lands_in_the_inbox(app_client, agent_factory, fake_tg):
+    """没绑过码的人就是客户：消息进收件箱，等代理人确认。"""
     import db
     import telegram
     tok, email = agent_factory()
@@ -102,11 +102,158 @@ def test_unbound_chat_gets_no_answers(app_client, agent_factory, fake_tg):
     s = db.SessionLocal()
     try:
         telegram.handle_update(s, row.path_secret, row.header_secret,
-                               _update("张伟明有哪些保单？"))
+                               _update("我的保单是不是快到期了？", "555001", "Lim Mei Ling"))
     finally:
         s.close()
-    assert len(fake_tg.sent) == 1
-    assert "还没绑定" in fake_tg.sent[0][1]
+
+    inbox = app_client.get("/api/inbox", headers=H(tok)).json()
+    assert len(inbox) == 1
+    assert inbox[0]["client"] == "Lim Mei Ling"
+    assert inbox[0]["channel"] == "telegram"
+    assert inbox[0]["unread"] == 1 and inbox[0]["status"] == "pending"
+
+    msgs = app_client.get(f"/api/inbox/{inbox[0]['id']}", headers=H(tok)).json()["messages"]
+    assert [m["role"] for m in msgs] == ["customer"]
+    assert msgs[0]["text"] == "我的保单是不是快到期了？"
+
+
+def test_ai_never_auto_replies_to_a_customer(app_client, agent_factory, fake_tg,
+                                              monkeypatch):
+    """合规红线：AI 不直接面对客户。客户只该收到写死的回执，绝不能是模型输出。"""
+    import db
+    import graph
+    import telegram
+    tok, email = agent_factory()
+    _connect(app_client, tok)
+    key, row = _bot_row(email)
+
+    def must_not_run(*a, **kw):
+        raise AssertionError("客户消息触发了模型调用")
+    monkeypatch.setattr(graph, "ask", must_not_run)
+    monkeypatch.setattr(graph, "llm_text", must_not_run)
+
+    s = db.SessionLocal()
+    try:
+        telegram.handle_update(s, row.path_secret, row.header_secret,
+                               _update("等待期多久？", "555002", "客户甲"))
+    finally:
+        s.close()
+
+    replies = [t for c, t in fake_tg.sent if c == "555002"]
+    assert replies == [telegram.CUSTOMER_ACK], replies
+
+    tid = app_client.get("/api/inbox", headers=H(tok)).json()[0]["id"]
+    msgs = app_client.get(f"/api/inbox/{tid}", headers=H(tok)).json()["messages"]
+    assert all(m["role"] == "customer" for m in msgs), "收件箱里出现了 AI 自动回复"
+
+
+def test_only_the_first_customer_message_gets_an_ack(app_client, agent_factory, fake_tg):
+    """第二条起不再回执，否则客户会被刷屏。"""
+    import db
+    import telegram
+    tok, email = agent_factory()
+    _connect(app_client, tok)
+    key, row = _bot_row(email)
+    for text in ("第一条", "第二条", "第三条"):
+        s = db.SessionLocal()
+        try:
+            telegram.handle_update(s, row.path_secret, row.header_secret,
+                                   _update(text, "555003", "话多的客户"))
+        finally:
+            s.close()
+    acks = [t for c, t in fake_tg.sent if c == "555003" and t == telegram.CUSTOMER_ACK]
+    assert len(acks) == 1
+
+    tid = app_client.get("/api/inbox", headers=H(tok)).json()[0]["id"]
+    assert len(app_client.get(f"/api/inbox/{tid}",
+                              headers=H(tok)).json()["messages"]) == 3
+
+
+def test_agent_reply_is_delivered_to_the_customer(app_client, agent_factory, fake_tg):
+    """代理人在网页上点发送 → 客户真的在 Telegram 收到。"""
+    import db
+    import telegram
+    tok, email = agent_factory()
+    _connect(app_client, tok)
+    key, row = _bot_row(email)
+    s = db.SessionLocal()
+    try:
+        telegram.handle_update(s, row.path_secret, row.header_secret,
+                               _update("在吗", "555004", "客户乙"))
+    finally:
+        s.close()
+    tid = app_client.get("/api/inbox", headers=H(tok)).json()[0]["id"]
+
+    r = app_client.post(f"/api/inbox/{tid}/send", headers=H(tok),
+                        json={"text": "在的，你的保单 8/20 到期"})
+    assert r.json()["delivered"] is True
+    assert ("555004", "在的，你的保单 8/20 到期") in fake_tg.sent
+
+    th = app_client.get(f"/api/inbox/{tid}", headers=H(tok)).json()
+    assert th["status"] == "sent" and th["unread"] == 0
+
+
+def test_manual_thread_reply_does_not_try_telegram(app_client, agent_factory, fake_tg):
+    """手工模拟的会话没有 chat_id，不该尝试外发。"""
+    import auth
+    import db
+    tok, _ = agent_factory()
+    key = auth.verify_token(tok)
+    s = db.SessionLocal()
+    try:
+        t = db.Thread(agent_id=key, client="手工客户", channel="manual")
+        s.add(t)
+        s.commit()
+        tid = t.id
+    finally:
+        s.close()
+
+    before = len(fake_tg.sent)
+    r = app_client.post(f"/api/inbox/{tid}/send", headers=H(tok), json={"text": "你好"})
+    assert r.json()["delivered"] is False
+    assert len(fake_tg.sent) == before
+
+
+def test_customer_message_notifies_the_agent(app_client, agent_factory, fake_tg):
+    """代理人绑过设备的话，客户一来就该收到推送提醒。"""
+    import db
+    import telegram
+    tok, email = agent_factory()
+    _connect(app_client, tok)
+    key, row = _bot_row(email)
+    code = app_client.post("/api/telegram/bindcode", headers=H(tok)).json()["code"]
+    s = db.SessionLocal()
+    try:
+        telegram.handle_update(s, row.path_secret, row.header_secret,
+                               _update(f"/start {code}", "700001", "代理人"))
+    finally:
+        s.close()
+    fake_tg.sent.clear()
+
+    s = db.SessionLocal()
+    try:
+        telegram.handle_update(s, row.path_secret, row.header_secret,
+                               _update("我想加保", "555005", "潜在客户"))
+    finally:
+        s.close()
+    to_agent = [t for c, t in fake_tg.sent if c == "700001"]
+    assert to_agent and "潜在客户" in to_agent[0] and "我想加保" in to_agent[0]
+
+
+def test_customer_threads_are_isolated_between_agents(app_client, agent_factory, fake_tg):
+    import db
+    import telegram
+    tok_a, email_a = agent_factory()
+    tok_b, _ = agent_factory()
+    _connect(app_client, tok_a)
+    key_a, row_a = _bot_row(email_a)
+    s = db.SessionLocal()
+    try:
+        telegram.handle_update(s, row_a.path_secret, row_a.header_secret,
+                               _update("A 的客户", "555006", "只属于A"))
+    finally:
+        s.close()
+    assert app_client.get("/api/inbox", headers=H(tok_b)).json() == []
 
 
 def test_bind_then_ask(app_client, agent_factory, fake_tg, monkeypatch):

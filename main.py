@@ -241,6 +241,7 @@ def inbox(aid: str = AID):
         for t in s.query(Thread).filter_by(agent_id=aid).all():
             last = t.messages[-1] if t.messages else None
             out.append(dict(id=t.id, client=t.client, unread=t.unread, status=t.status,
+                            channel=t.channel or "manual",
                             last=(last.text[:60] if last else ""), ts=(last.ts if last else "")))
         return out
     finally:
@@ -256,7 +257,8 @@ def _thread(s, tid, aid):
 
 def _thread_dict(t):
     return dict(id=t.id, client=t.client, lang=t.lang, status=t.status, mode=t.mode,
-                unread=t.unread, suggestions=json.loads(t.suggestions or "[]"),
+                channel=t.channel or "manual", unread=t.unread,
+                suggestions=json.loads(t.suggestions or "[]"),
                 messages=[dict(role=m.role, text=m.text, ts=m.ts) for m in t.messages])
 
 
@@ -325,7 +327,14 @@ def send(tid: int, req: SendReq, aid: str = AID):
         t.status, t.suggestions, t.unread = "sent", "[]", 0
         db.audit(s, aid, "send", f"thread={tid}")
         s.commit()
-        return dict(ok=True)
+        # Telegram 来的会话，回复要真的发回给客户
+        delivered = False
+        if t.channel == "telegram" and t.tg_chat_id:
+            try:
+                delivered = telegram.send_to_chat(s, aid, t.tg_chat_id, req.text)
+            except Exception:
+                log.exception("回复没能发到 Telegram thread=%s", tid)
+        return dict(ok=True, delivered=delivered)
     finally:
         s.close()
 
