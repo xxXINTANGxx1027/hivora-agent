@@ -588,3 +588,32 @@ def admin_toggle(agent_id: int, req: ToggleReq, _: str = ADM):
         return dict(ok=True, active=bool(a.active))
     finally:
         s.close()
+
+
+class CreateAgentReq(BaseModel):
+    email: str
+    password: str
+    name: str = ""
+    plan: str = "paid"
+
+
+@app.post("/api/admin/agents/create")
+def admin_create_agent(req: CreateAgentReq, _: str = ADM):
+    import secrets as _s
+    s = SessionLocal()
+    try:
+        email = req.email.strip().lower()
+        if not email or len(req.password) < 6:
+            raise HTTPException(400, "账号必填，密码至少 6 位")
+        if s.query(db.Agent).filter_by(email=email).first():
+            raise HTTPException(400, "该账号已存在")
+        salt = _s.token_hex(16)
+        s.add(db.Agent(agent_key="ag_" + _s.token_hex(8), email=email,
+                       name=req.name or email.split("@")[0],
+                       pw_hash=auth.hash_pw(req.password, salt), salt=salt,
+                       plan=req.plan or "paid"))
+        db.audit(s, "admin_create_agent", email)
+        s.commit()
+        return {"ok": True}
+    finally:
+        s.close()

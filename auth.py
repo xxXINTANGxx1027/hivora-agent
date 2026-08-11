@@ -81,19 +81,23 @@ def current_admin(authorization: str = Header(default="")) -> str:
         s.close()
 
 
-ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@hivora.my")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "Hivora-Admin-2026")
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin123")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
 
 
 def ensure_admin():
     s = db.SessionLocal()
     try:
-        if not s.query(db.Agent).filter_by(email=ADMIN_EMAIL).first():
-            salt = secrets.token_hex(16)
+        a = s.query(db.Agent).filter_by(agent_key="agent_admin").first()
+        salt = secrets.token_hex(16)
+        if a:   # 已存在 → 同步为当前配置的账号/密码
+            a.email, a.role, a.plan = ADMIN_EMAIL, "admin", "owner"
+            a.pw_hash, a.salt = hash_pw(ADMIN_PASSWORD, salt), salt
+        else:
             s.add(db.Agent(agent_key="agent_admin", email=ADMIN_EMAIL, name="Admin (XT)",
                            pw_hash=hash_pw(ADMIN_PASSWORD, salt), salt=salt,
                            role="admin", plan="owner"))
-            s.commit()
+        s.commit()
     finally:
         s.close()
 

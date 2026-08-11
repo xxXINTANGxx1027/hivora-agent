@@ -324,14 +324,12 @@
   </nav>
   <button id="more-btn" onclick="toggleMore()"><svg class="nic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg><span class="lbl-s" id="more-lbl">更多</span><span class="badge" id="b-more"></span></button>
   <div class="foot" style="margin-top:auto"><span id="foot-model">…</span> · LangGraph<br><span id="foot-name"></span> · PDPA 隔离 · <a href="javascript:logout()" style="color:var(--hivora)">退出</a></div>
-  <button class="btn ghost" style="width:100%" onclick="openCustomer()"><svg class="nic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg> <span class="lbl" id="cust-lbl">客户看到的 →</span></button>
 </aside>
 
 <div id="more-sheet" class="hide">
   <button onclick="sheetGo('products')"><svg class="nic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg><span id="ms-products">产品目录</span></button>
   <button onclick="sheetGo('calendar')"><svg class="nic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg><span id="ms-calendar">预约日历</span></button>
   <button onclick="sheetGo('renewals')"><svg class="nic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg><span id="ms-renewals">续保管道</span></button>
-  <button onclick="sheetCust()"><svg class="nic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg><span id="ms-cust">客户看到的</span></button>
 </div>
 
 <main>
@@ -456,7 +454,8 @@
       <div><h1>管理后台</h1>
         <div class="sub">发放邀请码（= 卖出一个账号）· 管理代理人账号启停</div></div>
       <div class="actions">
-        <button class="btn" onclick="makeInvite()">＋ 生成邀请码</button>
+        <button class="btn ghost" onclick="makeInvite()">＋ 生成邀请码</button>
+        <button class="btn" onclick="openModal('newAgent')">＋ 创建账号</button>
       </div>
     </div>
     <div class="panel"><h3>🎟 邀请码</h3><div id="adm-invites"></div></div>
@@ -509,14 +508,13 @@
       <div class="logo" style="width:34px;height:34px;border-radius:9px;background:var(--hivora);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800">H</div>
       <div><b style="font-size:16px">Hivora</b><div class="sub" style="margin:0">Insurance Agent · Stage</div></div>
     </div>
-    <div class="mfield"><label>Email</label><input id="lg-email" type="email" placeholder="you@example.com"></div>
+    <div class="mfield"><label>Login ID</label><input id="lg-email" placeholder="账号 / Login ID"></div>
     <div class="mfield" id="lg-name-w" style="display:none"><label>姓名 / Name</label><input id="lg-name"></div>
     <div class="mfield" id="lg-code-w" style="display:none"><label>邀请码 / Invite Code</label><input id="lg-code" placeholder="HIV-XXXXXX（向管理员购买获取）"></div>
     <div class="mfield"><label>密码 / Password</label><input id="lg-pw" type="password" placeholder="至少 6 位"></div>
     <div class="merr" id="lg-err"></div>
     <button class="btn" style="width:100%;margin-top:6px" id="lg-btn" onclick="doAuth()">登录 / Login</button>
-    <button class="btn ghost" style="width:100%;margin-top:8px" onclick="toggleReg()" id="lg-toggle">没有账号？注册 →</button>
-    <div class="sub" style="margin-top:12px">演示账号：demo@hivora.my / demo1234</div>
+    <div class="sub" style="margin-top:12px">账号由管理员发放，购买请联系管理员</div>
   </div>
 </div>
 
@@ -583,7 +581,7 @@ const I18N={
   th_client:"客户",th_purpose:"目的",th_channel:"方式/地点",th_urgency:"紧迫度",
   th_date:"日期",th_time:"时间",expired:"已过期",valid:"有效",no_policy:"暂无保单",
   expired_n:"已过期 {n} 天",past:"已过",
-  edit:"编辑",m_editc:"编辑客户",m_editp:"编辑保单",m_client:"新增客户",m_policy:"给客户加保单",m_product:"新增产品",m_appt:"新增预约",
+  edit:"编辑",m_editc:"编辑客户",m_editp:"编辑保单",m_newagent:"创建代理人账号",f_loginid:"登录账号 *",f_pw:"密码 *",f_plan:"套餐",m_client:"新增客户",m_policy:"给客户加保单",m_product:"新增产品",m_appt:"新增预约",
   f_name:"姓名 *",f_phone:"电话",f_notes:"备注",f_client:"客户姓名 *",f_product:"产品 *",
   f_pno:"保单号",f_premium:"保费",f_renewal:"续保日",f_pname:"产品名 *",f_type:"类型",
   f_price:"价格区间",f_high:"要点（逗号分隔）",f_who:"客户 *",f_date:"日期 *",f_time:"时间",
@@ -622,7 +620,7 @@ const I18N={
   th_client:"Client",th_purpose:"Purpose",th_channel:"Channel/Venue",th_urgency:"Urgency",
   th_date:"Date",th_time:"Time",expired:"Expired",valid:"Active",no_policy:"No policies yet",
   expired_n:"Expired {n}d ago",past:"Past",
-  edit:"Edit",m_editc:"Edit Client",m_editp:"Edit Policy",m_client:"New Client",m_policy:"Add Policy to Client",m_product:"New Product",m_appt:"New Appointment",
+  edit:"Edit",m_editc:"Edit Client",m_editp:"Edit Policy",m_newagent:"Create Agent Account",f_loginid:"Login ID *",f_pw:"Password *",f_plan:"Plan",m_client:"New Client",m_policy:"Add Policy to Client",m_product:"New Product",m_appt:"New Appointment",
   f_name:"Name *",f_phone:"Phone",f_notes:"Notes",f_client:"Client name *",f_product:"Product *",
   f_pno:"Policy no.",f_premium:"Premium",f_renewal:"Renewal date",f_pname:"Product name *",f_type:"Type",
   f_price:"Price range",f_high:"Highlights (comma separated)",f_who:"Client *",f_date:"Date *",f_time:"Time",
@@ -1060,6 +1058,14 @@ async function loadAppts(){
 }
 /* ── 新增弹窗（右上角 ＋ 按钮触发）── */
 const MODALS={
+  newAgent:{title:"m_newagent",fields:[
+    {id:"email",label:"f_loginid",ph:"代理人的登录账号（如 ali123 或邮箱）"},
+    {id:"password",label:"f_pw",ph:"至少 6 位，发给代理人"},
+    {id:"name",label:"f_name",ph:""},
+    {id:"plan",label:"f_plan",ph:"paid / trial"}],
+    required:["email","password"],
+    save:async v=>{const r=await post("admin/agents/create",v);
+      if(!r.ok&&r.detail)throw r.detail; loadAdmin();}},
   editClient:{title:"m_editc",fields:[
     {id:"orig",type:"hidden"},
     {id:"name",label:"f_name"},
