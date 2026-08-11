@@ -97,6 +97,8 @@ class Thread(Base):
     suggestions = Column(Text, default="[]")         # JSON list
     channel = Column(String(16), default="manual")   # manual / telegram
     tg_chat_id = Column(String(32), index=True, default="")
+    # 关联到客户档案。为空 = 还是个新线索（陌生人主动找上门，还没入库）
+    client_id = Column(Integer, ForeignKey("clients.id"), index=True, nullable=True)
     messages = relationship("Message", cascade="all,delete", backref="thread",
                             order_by="Message.id")
 
@@ -423,6 +425,7 @@ def migrate_columns():
             "ALTER TABLE agents ADD COLUMN token_quota INTEGER DEFAULT 0",
             "ALTER TABLE threads ADD COLUMN channel VARCHAR(16) DEFAULT 'manual'",
             "ALTER TABLE threads ADD COLUMN tg_chat_id VARCHAR(32) DEFAULT ''",
+            "ALTER TABLE threads ADD COLUMN client_id INTEGER",
         ]:
             try:
                 conn.execute(text(ddl))

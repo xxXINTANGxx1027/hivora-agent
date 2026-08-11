@@ -47,6 +47,10 @@ Python + FastAPI + LangGraph + SQLAlchemy 后端，单文件 HTML SPA 前端。
       客户只收到 `telegram.CUSTOMER_ACK` 这句写死的回执
     - token 用 Fernet 加密存、接口只回后 4 位；webhook 靠随机路径 + secret header 认身份
     - 代理人在网页点发送 → 通过 `telegram.send_to_chat` 真的发回客户
+14. **线索 vs 客户**：客户是主动找上门的，第一次接触时还不在库里。
+    `Thread.client_id` 为空 = 新线索。`_ctx_for` 优先按 `client_id` 取档案，
+    没关联才按名字兜底 —— 所以「加为客户」不只是整理数据，它决定了 AI 起草
+    能不能看到这个人的保单。
 
 ## 架构速查
 - LangGraph 图：Supervisor(关键词fast-path+LLM路由) → policy/clientbook/drafting/action/chat/fallback → compliance

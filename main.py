@@ -242,6 +242,7 @@ def inbox(aid: str = AID):
             last = t.messages[-1] if t.messages else None
             out.append(dict(id=t.id, client=t.client, unread=t.unread, status=t.status,
                             channel=t.channel or "manual",
+                            client_id=t.client_id, is_lead=not t.client_id,
                             last=(last.text[:60] if last else ""), ts=(last.ts if last else "")))
         return out
     finally:
@@ -258,6 +259,7 @@ def _thread(s, tid, aid):
 def _thread_dict(t):
     return dict(id=t.id, client=t.client, lang=t.lang, status=t.status, mode=t.mode,
                 channel=t.channel or "manual", unread=t.unread,
+                client_id=t.client_id, is_lead=not t.client_id,
                 suggestions=json.loads(t.suggestions or "[]"),
                 messages=[dict(role=m.role, text=m.text, ts=m.ts) for m in t.messages])
 
@@ -272,8 +274,14 @@ def thread(tid: int, aid: str = AID):
 
 
 def _ctx_for(s, t, aid):
-    client = (db.live(s.query(Client), Client).filter_by(agent_id=aid)
-              .filter(Client.name == t.client).first())
+    # 关联过就用关联的档案；没关联（还是线索）再按名字兜底找一次
+    client = None
+    if t.client_id:
+        client = (db.live(s.query(Client), Client)
+                  .filter_by(agent_id=aid, id=t.client_id).first())
+    if client is None:
+        client = (db.live(s.query(Client), Client).filter_by(agent_id=aid)
+                  .filter(Client.name == t.client).first())
     convo = "\n".join(f"{m.role}: {m.text}" for m in t.messages[-5:])
     q = t.messages[-1].text if t.messages else ""
     chunks = search_policy_chunks(q, aid)
@@ -366,6 +374,42 @@ def customer_message(tid: int, req: SendReq, aid: str = AID):
         t.status, t.suggestions, t.unread = "pending", "[]", t.unread + 1
         s.commit()
         return dict(ok=True)
+    finally:
+        s.close()
+
+
+class LinkReq(BaseModel):
+    client_id: int | None = None      # 关联到已有客户
+    name: str = ""                    # 或者用这些字段新建一个
+    phone: str = ""
+    notes: str = ""
+
+
+@app.post("/api/inbox/{tid}/link")
+def link_thread(tid: int, req: LinkReq, aid: str = AID):
+    """把主动找上门的线索转成客户档案。
+
+    客户是自己找过来的，第一次接触时他还不在库里 —— 转成客户之后
+    AI 起草才拿得到保单、续保日这些上下文。
+    """
+    s = SessionLocal()
+    try:
+        t = _thread(s, tid, aid)
+        if req.client_id:
+            c = _client_by_id(s, aid, req.client_id)
+        else:
+            name = (req.name or t.client or "").strip()
+            if not name:
+                raise HTTPException(400, "请填客户姓名")
+            c = Client(agent_id=aid, name=name, phone=req.phone,
+                       notes=req.notes or f"来自 {t.channel or 'manual'} 主动咨询")
+            s.add(c)
+            s.flush()
+        t.client_id = c.id
+        t.client = c.name
+        db.audit(s, aid, "link_thread", f"thread={tid} client={c.id} {c.name}")
+        s.commit()
+        return dict(ok=True, client_id=c.id, name=c.name)
     finally:
         s.close()
 

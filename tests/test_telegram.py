@@ -417,3 +417,118 @@ def test_telegram_endpoints_require_login(app_client):
     for path in ("/api/telegram",):
         assert app_client.get(path).status_code == 401
     assert app_client.post("/api/telegram/connect", json={"token": "x"}).status_code == 401
+
+
+# ── 客户主动找上门 → 线索 → 客户 ──────────────────────────────
+def _lead_thread(app_client, tok, email, fake_tg, chat="666001", name="陌生人"):
+    import db
+    import telegram
+    _connect(app_client, tok)
+    key, row = _bot_row(email)
+    s = db.SessionLocal()
+    try:
+        telegram.handle_update(s, row.path_secret, row.header_secret,
+                               _update("我想了解一下医疗险", chat, name))
+    finally:
+        s.close()
+    return app_client.get("/api/inbox", headers=H(tok)).json()[0]
+
+
+def test_stranger_arrives_as_a_lead(app_client, agent_factory, fake_tg):
+    """客户是自己找过来的，第一次接触时还不在客户库里。"""
+    tok, email = agent_factory()
+    th = _lead_thread(app_client, tok, email, fake_tg)
+    assert th["is_lead"] is True and th["client_id"] is None
+    assert app_client.get("/api/clients", headers=H(tok)).json() == []
+
+
+def test_lead_becomes_a_new_client(app_client, agent_factory, fake_tg):
+    tok, email = agent_factory()
+    th = _lead_thread(app_client, tok, email, fake_tg)
+
+    r = app_client.post(f"/api/inbox/{th['id']}/link", headers=H(tok),
+                        json={"name": "Ahmad Faiz", "phone": "012-345 6789"})
+    assert r.status_code == 200
+
+    cs = app_client.get("/api/clients", headers=H(tok)).json()
+    assert [c["name"] for c in cs] == ["Ahmad Faiz"]
+
+    after = app_client.get(f"/api/inbox/{th['id']}", headers=H(tok)).json()
+    assert after["is_lead"] is False
+    assert after["client_id"] == cs[0]["id"]
+    assert after["client"] == "Ahmad Faiz"
+
+
+def test_lead_links_to_an_existing_client(app_client, agent_factory, fake_tg):
+    """老客户换了个 Telegram 号找来，应该能关联到已有档案而不是重复建。"""
+    tok, email = agent_factory()
+    app_client.post("/api/clients", headers=H(tok),
+                    json={"name": "Lim Mei Ling", "phone": "016-777 9911"})
+    cid = app_client.get("/api/clients", headers=H(tok)).json()[0]["id"]
+    th = _lead_thread(app_client, tok, email, fake_tg)
+
+    app_client.post(f"/api/inbox/{th['id']}/link", headers=H(tok),
+                    json={"client_id": cid})
+    after = app_client.get(f"/api/inbox/{th['id']}", headers=H(tok)).json()
+    assert after["client_id"] == cid and after["client"] == "Lim Mei Ling"
+    assert len(app_client.get("/api/clients", headers=H(tok)).json()) == 1
+
+
+def test_linked_thread_gives_the_ai_real_context(app_client, agent_factory, fake_tg):
+    """关联之后，起草时才拿得到这个人的保单——这就是关联的意义。"""
+    import db
+    import main
+    tok, email = agent_factory()
+    app_client.post("/api/clients", headers=H(tok), json={"name": "Tan Ah Kow"})
+    cid = app_client.get("/api/clients", headers=H(tok)).json()[0]["id"]
+    app_client.post("/api/policies", headers=H(tok),
+                    json={"client_id": cid, "product": "MediShield Plus",
+                          "policy_no": "MSP-9001"})
+    th = _lead_thread(app_client, tok, email, fake_tg)
+
+    import auth
+    key = auth.verify_token(tok)
+    s = db.SessionLocal()
+    try:
+        t = s.query(db.Thread).filter_by(id=th["id"]).first()
+        ci, _, _, _ = main._ctx_for(s, t, key)
+        assert ci == "", "还没关联就不该有客户档案"
+    finally:
+        s.close()
+
+    app_client.post(f"/api/inbox/{th['id']}/link", headers=H(tok),
+                    json={"client_id": cid})
+    s = db.SessionLocal()
+    try:
+        t = s.query(db.Thread).filter_by(id=th["id"]).first()
+        ci, _, _, _ = main._ctx_for(s, t, key)
+        assert "Tan Ah Kow" in ci and "MSP-9001" in ci
+    finally:
+        s.close()
+
+
+def test_cannot_link_a_thread_to_another_agents_client(app_client, agent_factory, fake_tg):
+    tok_a, email_a = agent_factory()
+    tok_b, _ = agent_factory()
+    app_client.post("/api/clients", headers=H(tok_b), json={"name": "B 的客户"})
+    other = app_client.get("/api/clients", headers=H(tok_b)).json()[0]["id"]
+    th = _lead_thread(app_client, tok_a, email_a, fake_tg)
+    r = app_client.post(f"/api/inbox/{th['id']}/link", headers=H(tok_a),
+                        json={"client_id": other})
+    assert r.status_code == 404
+
+
+def test_link_without_a_name_is_refused(app_client, agent_factory, fake_tg):
+    tok, email = agent_factory()
+    th = _lead_thread(app_client, tok, email, fake_tg, name="")
+    s_id = th["id"]
+    import db
+    s = db.SessionLocal()
+    try:
+        t = s.query(db.Thread).filter_by(id=s_id).first()
+        t.client = ""
+        s.commit()
+    finally:
+        s.close()
+    assert app_client.post(f"/api/inbox/{s_id}/link", headers=H(tok),
+                           json={}).status_code == 400

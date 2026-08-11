@@ -615,6 +615,8 @@ const I18N={
   back_ai:"🤖 恢复 AI 协助",human:"人工",sent_note:"✅ 已回复。客户再来消息会出现在这里。",
   pick_thread:"← 选择一个对话",reply_ph:"自己写，或点上面的建议回复填入…",
   tg_thread:"✈️ Telegram",tg_sent:"✅ 已发到客户的 Telegram",
+  lead:"新线索",to_client:"＋ 加为客户",m_link:"把线索转成客户",
+  f_link_to:"关联到",new_client_opt:"➕ 新建客户（用下面的信息）",
   reply_ph_human:"人工回复…",sugg_pick:"点击填入",sugg_styles:["💼 专业详细","😊 亲切热情","⚡ 简短快捷"],
   suggesting:"Hivora 生成 3 条建议中",thinking:"Hivora 思考中",analyzing:"Hivora 分析中",
   opp_btn:"✨ 加保机会分析",opp_cap:"✨ 加保机会（仅供参考）",
@@ -655,6 +657,8 @@ const I18N={
   back_ai:"🤖 Resume AI",human:"Human",sent_note:"✅ Replied. New client messages will appear here.",
   pick_thread:"← Pick a conversation",reply_ph:"Type your reply, or click a suggestion above…",
   tg_thread:"✈️ Telegram",tg_sent:"✅ Sent to the client on Telegram",
+  lead:"New lead",to_client:"＋ Add as client",m_link:"Turn lead into a client",
+  f_link_to:"Link to",new_client_opt:"➕ Create new (using the fields below)",
   reply_ph_human:"Reply manually…",sugg_pick:"click to use",sugg_styles:["💼 Professional","😊 Friendly","⚡ Short & quick"],
   suggesting:"Hivora is drafting 3 suggestions",thinking:"Hivora is thinking",analyzing:"Hivora is analyzing",
   opp_btn:"✨ Upsell Analysis",opp_cap:"✨ Upsell opportunities (for reference)",
@@ -927,7 +931,7 @@ async function loadInbox(){
   const ts=await api("inbox");
   $("#inbox-list").innerHTML=ts.map(th=>`
     <div class="titem ${curThread===th.id?"on":""}" onclick="openThread(${th.id})">
-      <b>${esc(th.client)}</b> ${th.channel==="telegram"?`<span class="pill blue" style="font-size:9px;padding:1px 6px">✈️</span>`:""}${th.unread?`<span class="badge">${esc(th.unread)}</span>`:""}
+      <b>${esc(th.client)}</b> ${th.channel==="telegram"?`<span class="pill blue" style="font-size:9px;padding:1px 6px">✈️</span>`:""}${th.is_lead?`<span class="pill warn" style="font-size:9px;padding:1px 6px">${t("lead")}</span>`:""}${th.unread?`<span class="badge">${esc(th.unread)}</span>`:""}
       <div class="p">${esc(th.last)}</div>
       <span class="pill ${th.status==="sent"?"ok":th.status==="drafted"?"blue":"warn"}">
         ${{pending:t("st_pending"),drafted:t("st_drafted"),sent:t("st_sent")}[th.status]}</span>
@@ -951,6 +955,9 @@ async function openThread(id){
   $("#thread").innerHTML=`
     <div class="thr-head">💬 ${esc(th.client)}
       ${th.channel==="telegram"?`<span class="pill blue">${t("tg_thread")}</span>`:""}
+      ${th.is_lead?`<span class="pill warn">${t("lead")}</span>
+        <button class="btn ghost" style="padding:4px 10px;font-size:11px"
+          onclick="linkLead(${id})">${t("to_client")}</button>`:""}
       <span class="pill blue" style="margin-left:auto">${esc(th.lang)}</span>
       ${human?`<span class="pill due">${t("human")}</span>`:''}</div>
     <div class="thr-msgs">${th.messages.map(m=>
@@ -963,6 +970,15 @@ async function openThread(id){
         <button class="btn" onclick="sendReply(${id})">${t("send")}</button>
       </div></div>`;
   const box=$(".thr-msgs"); box.scrollTop=box.scrollHeight;
+}
+async function linkLead(tid){
+  const cs=await api("clients");
+  const th=await api("inbox/"+tid);
+  const m=MODALS.linkLead;
+  m.fields[1].options=[{v:"",label:t("new_client_opt")}]
+    /* 不用模板串：保持"源码里不出现裸的 ${c.*}"这条不变量，好静态检查 */
+    .concat(cs.map(c=>({v:String(c.id),label:c.phone?c.name+" · "+c.phone:c.name})));
+  openModal("linkLead",{tid:String(tid),client_id:"",name:th.client,phone:"",notes:""});
 }
 function suggCards(sugg){
   const styles=t("sugg_styles");
@@ -1125,12 +1141,24 @@ function tgConnected(t){
       <span class="meta">${esc(c.created)}</span>
       <button class="icobtn" onclick="tgUnlink(${Number(c.id)})" aria-label="unlink">🗑</button>
     </div>`).join("");
+  const link=`https://t.me/${t.username}`;
   return `<div class="doc-row" style="margin-bottom:14px">
       ✅ 已连接 <b>@${esc(t.username)}</b>
       <span class="meta">token ${esc(t.token_hint)} · ${esc(t.since)}</span>
       <button class="btn ghost" style="padding:4px 10px;font-size:11px"
         onclick="tgDisconnect()">断开</button></div>
-    <div style="margin-bottom:8px"><b style="font-size:13px">已绑定的设备</b></div>
+    <div style="background:var(--hivora-light);border-radius:10px;padding:12px 14px;
+                margin-bottom:16px">
+      <div style="font-size:12.5px;font-weight:600;margin-bottom:6px">📣 把这个链接发出去，客户就能找到你</div>
+      <div class="row" style="gap:6px">
+        <input id="tg-link" readonly value="${esc(link)}" style="flex:1;font-family:ui-monospace,Menlo,monospace;font-size:12px">
+        <button class="btn ghost" style="padding:6px 12px;font-size:12px"
+          onclick="navigator.clipboard.writeText('${esc(link)}');this.textContent='已复制'">复制</button>
+      </div>
+      <div class="sub" style="margin-top:6px">放进 WhatsApp 签名、Instagram 简介、名片。
+        客户点进来发消息 → 直接进你的收件箱，标成「新线索」。</div>
+    </div>
+    <div style="margin-bottom:8px"><b style="font-size:13px">已绑定的设备（你自己的手机）</b></div>
     ${chats||`<span class="sub">还没有设备绑定。点下面拿绑定码。</span>`}
     <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)">
       <div style="margin-bottom:10px"><span class="step-n">1</span>
@@ -1253,6 +1281,20 @@ async function loadAppts(){
 }
 /* ── 新增弹窗（右上角 ＋ 按钮触发）── */
 const MODALS={
+  linkLead:{title:"m_link",fields:[
+    {id:"tid",type:"hidden"},
+    {id:"client_id",label:"f_link_to",type:"select",options:[]},
+    {id:"name",label:"f_name"},
+    {id:"phone",label:"f_phone"},
+    {id:"notes",label:"f_notes"}],
+    required:[],
+    save:async v=>{
+      const body=v.client_id?{client_id:Number(v.client_id)}
+                            :{name:v.name,phone:v.phone,notes:v.notes};
+      if(!v.client_id&&!v.name)throw t("need_required");
+      await post("inbox/"+v.tid+"/link",body);
+      openThread(Number(v.tid)); loadInbox(); loadClients(); loadDash();
+    }},
   editClient:{title:"m_editc",fields:[
     {id:"id",type:"hidden"},
     {id:"name",label:"f_name"},
@@ -1307,7 +1349,13 @@ function openModal(kind,preset={}){
   $("#modal-body").innerHTML=m.fields.map(f=>f.type==="hidden"
     ?`<input type="hidden" id="m-${f.id}">`
     :`<div class="mfield"><label for="m-${f.id}">${t(f.label)}</label>
-    <input id="m-${f.id}" type="${f.type||"text"}" placeholder="${f.ph||""}"></div>`).join("");
+    ${f.type==="select"
+      ? `<select id="m-${f.id}" style="width:100%;border:1px solid var(--line);
+           border-radius:8px;padding:8px 10px;font-size:13px;font-family:inherit">
+          ${(f.options||[]).map(o=>`<option value="${esc(o.v)}">${esc(o.label)}</option>`).join("")}
+         </select>`
+      : `<input id="m-${f.id}" type="${f.type||"text"}" placeholder="${f.ph||""}">`}
+    </div>`).join("");
   m.fields.forEach(f=>{if(preset[f.id]!==undefined)$("#m-"+f.id).value=preset[f.id];});
   $("#modal").classList.remove("hide");
   const ff=m.fields.find(f=>f.type!=="hidden");
