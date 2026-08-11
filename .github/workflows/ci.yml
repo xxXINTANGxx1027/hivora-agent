@@ -15,7 +15,20 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: pip install -r requirements.txt -r requirements-dev.txt
-      - run: pytest tests -q
+      - run: pytest tests -q --ignore=tests/test_browser_smoke.py
+
+  browser:
+    # 真浏览器冒烟：接口全绿但界面点不动的那类 bug，只有这里拦得住
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: playwright install --with-deps chromium
+      - run: pytest tests/test_browser_smoke.py -q
 
   guards:
     # 生产守卫：配置缺失必须拒绝启动，而不是回落到不安全的默认值

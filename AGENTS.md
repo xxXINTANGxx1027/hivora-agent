@@ -53,9 +53,16 @@ Python + FastAPI + LangGraph + SQLAlchemy 后端，单文件 HTML SPA 前端。
 
 ## 测试
 ```bash
-cd server && .venv/bin/python -m pytest tests -q     # 43 个回归测试，改完必须全绿
+cd server
+.venv/bin/python -m pytest tests -q --ignore=tests/test_browser_smoke.py  # 接口层，2 秒
+.venv/bin/python -m pytest tests/test_browser_smoke.py -q                 # 真浏览器，约 40 秒
 ```
-覆盖：token 伪造/过期/停用即失效、多租户隔离、审计 agent_id、软删与硬删、
-按 id 定位、AI 录入容错、流式事件、前端转义静态检查。
+接口层覆盖：token 伪造/过期/停用即失效、多租户隔离、审计 agent_id、软删与硬删、
+按 id 定位、AI 录入容错、流式事件、管理接口、前端转义与前后台分离的静态检查。
+
+**浏览器冒烟不是可选的。** 有两类 bug 接口测试永远看不见，而且都真实发生过：
+浮层的内联 `display` 压过 `.hide`，界面整个点不动；`applyLang()` 中途抛异常，
+后面所有文案都不再更新。改动前端后请跑一遍。首次要装：
+`.venv/bin/pip install playwright && .venv/bin/playwright install chromium`
+
 测试跑在临时 SQLite 上，不碰 `server/hivora.db`，也不会打真实模型。
-CI（`.github/workflows/ci.yml`）跑同一套测试 + 生产守卫冒烟。

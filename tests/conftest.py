@@ -17,7 +17,7 @@ os.environ.update(
     ADMIN_EMAIL="admin@test.local",
     ADMIN_PASSWORD="Test-Admin-2026",
     DEMO_DATA="1",
-    ALLOWED_ORIGINS="http://testserver",
+    ALLOWED_ORIGINS="*",   # 浏览器冒烟的静态站端口随机，没法预先白名单
 )
 os.environ.pop("OPENROUTER_API_KEY", None)   # 测试绝不打真实模型
 os.environ.pop("HIVORA_ENV", None)
@@ -77,3 +77,7 @@ def agent_factory(app_client, admin_token):
 
 def H(token):
     return {"Authorization": f"Bearer {token}"}
+
+
+# 浏览器冒烟的夹具（live_server / admin_site / browser / page）
+from conftest_browser import *  # noqa: E402,F401,F403
