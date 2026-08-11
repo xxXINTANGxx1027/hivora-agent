@@ -3,7 +3,6 @@ services:
     name: hivora-agent-stage
     runtime: python
     plan: free
-    rootDir: server
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
