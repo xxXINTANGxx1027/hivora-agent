@@ -525,9 +525,11 @@
 
 <script>
 const $=q=>document.querySelector(q);
+const API_BASE=(location.hostname==="localhost"||location.hostname.endsWith("onrender.com"))
+  ?"":"https://hivora-agent-stage.onrender.com";
 const TOKEN=()=>localStorage.getItem("hivora_token")||"";
 const api=(p,opt={})=>{opt.headers={...(opt.headers||{}),Authorization:"Bearer "+TOKEN()};
-  return fetch("/api/"+p,opt).then(r=>{if(r.status===401){showLogin();throw new Error("401");}return r.json();});};
+  return fetch(API_BASE+"/api/"+p,opt).then(r=>{if(r.status===401){showLogin();throw new Error("401");}return r.json();});};
 
 /* ── i18n（中/英）── */
 const I18N={
@@ -620,7 +622,7 @@ async function doAuth(){
   $("#lg-err").textContent="";
   const body={email:$("#lg-email").value.trim(),password:$("#lg-pw").value,
               name:REG?$("#lg-name").value.trim():""};
-  const r=await fetch("/api/auth/"+(REG?"register":"login"),{method:"POST",
+  const r=await fetch(API_BASE+"/api/auth/"+(REG?"register":"login"),{method:"POST",
     headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
   const j=await r.json();
   if(!r.ok){$("#lg-err").textContent=j.detail||"失败，请重试";return;}
@@ -913,7 +915,7 @@ async function uploadDoc(){
   fd.append("file",f);fd.append("insurer",$("#doc-insurer").value);
   fd.append("product",$("#doc-product").value);
   $("#doc-msg").textContent="上传解析中…";
-  const r=await fetch("/api/documents",{method:"POST",
+  const r=await fetch(API_BASE+"/api/documents",{method:"POST",
     headers:{Authorization:"Bearer "+TOKEN()},body:fd});
   const j=await r.json();
   $("#doc-msg").textContent=r.ok?`✅ 已入库：${j.pages} 页 → ${j.chunks} 个知识块，条款问答立即可用`:(j.detail||"上传失败");

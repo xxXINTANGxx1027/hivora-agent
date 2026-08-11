@@ -6,6 +6,7 @@ import os
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
@@ -16,6 +17,8 @@ from graph import MODEL, ask, llm
 from knowledge import search_policy_chunks
 
 app = FastAPI(title="Hivora Insurance Agent")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
+                   allow_headers=["*"])
 db.ensure_schema()
 db.seed_if_empty()
 auth.ensure_demo_agent()
