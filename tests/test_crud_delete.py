@@ -89,7 +89,8 @@ def test_admin_purge_is_permanent(app_client, admin_token, agent_factory):
     app_client.post("/api/policies", headers=H(tok),
                     json={"client_id": cl["id"], "product": "P"})
 
-    r = app_client.post(f"/api/admin/clients/{cl['id']}/purge", headers=H(admin_token))
+    r = app_client.post(f"/api/admin/clients/{cl['id']}/purge", headers=H(admin_token),
+                        json={"confirm": "要求被遗忘的人"})
     assert r.status_code == 200 and r.json()["purged"]["policies"] == 1
 
     s = db.SessionLocal()
@@ -104,8 +105,8 @@ def test_admin_purge_is_permanent(app_client, admin_token, agent_factory):
 def test_purge_requires_admin(app_client, agent_factory):
     tok, _ = agent_factory()
     cl = _mk_client(app_client, tok, "普通客户")
-    assert app_client.post(f"/api/admin/clients/{cl['id']}/purge",
-                           headers=H(tok)).status_code == 403
+    assert app_client.post(f"/api/admin/clients/{cl['id']}/purge", headers=H(tok),
+                           json={"confirm": "普通客户"}).status_code == 403
 
 
 def test_upload_rejects_bad_type_and_size(app_client, agent_factory):

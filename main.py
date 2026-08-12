@@ -860,14 +860,24 @@ def trash(aid: str = AID):
         s.close()
 
 
+class PurgeReq(BaseModel):
+    confirm: str = ""      # 必须打一遍客户姓名
+
+
 @app.post("/api/admin/clients/{cid}/purge")
-def admin_purge_client(cid: int, adm: str = ADM):
-    """PDPA 被遗忘权：彻底删除某客户及其保单、预约、对话。不可恢复。"""
+def admin_purge_client(cid: int, req: PurgeReq = PurgeReq(), adm: str = ADM):
+    """PDPA 被遗忘权：彻底删除某客户及其保单、预约、对话。不可恢复。
+
+    **服务端强制二次确认**：必须把客户姓名原样打一遍。只靠前端弹窗不够——
+    误调接口、脚本写错一样会删掉。
+    """
     s = SessionLocal()
     try:
         c = s.query(Client).filter_by(id=cid).first()
         if not c:
             raise HTTPException(404, "客户不存在")
+        if (req.confirm or "").strip() != (c.name or "").strip():
+            raise HTTPException(400, f"请把客户姓名原样打一遍确认：{c.name}")
         name, owner = c.name, c.agent_id
         pol = s.query(Policy).filter_by(client_id=c.id).delete()
         appt = (s.query(Appointment)
@@ -1111,6 +1121,7 @@ def admin_agents(_: str = ADM):
 
 class ToggleReq(BaseModel):
     active: bool
+    confirm: str = ""      # 停用时必须打一遍邮箱；启用不需要
 
 
 @app.post("/api/admin/agents/{agent_id}/toggle")
@@ -1122,6 +1133,9 @@ def admin_toggle(agent_id: int, req: ToggleReq, adm: str = ADM):
             raise HTTPException(404)
         if a.role == "admin":
             raise HTTPException(400, "不能停用管理员")
+        # 停用会让对方立刻用不了，属于影响生意的操作，要二次确认。启用无害，不用。
+        if not req.active and (req.confirm or "").strip().lower() != (a.email or "").lower():
+            raise HTTPException(400, f"停用会让对方立刻登不进去。请打一遍邮箱确认：{a.email}")
         a.active = 1 if req.active else 0
         db.audit(s, adm, "toggle_agent", f"{a.email}:{a.active}")
         s.commit()
@@ -1298,6 +1312,37 @@ def admin_audit(agent_key: str = "", action: str = "", limit: int = 100,
         return [dict(id=r.id, ts=r.ts, agent_key=r.agent_id,
                      agent=names.get(r.agent_id, r.agent_id),
                      action=r.action, detail=r.detail) for r in rows]
+    finally:
+        s.close()
+
+
+@app.get("/api/admin/audit/export")
+def admin_audit_export(agent_key: str = "", action: str = "", limit: int = 5000,
+                       _: str = ADM):
+    """导出审计日志为 CSV。监管或客户来问的时候要拿得出东西。"""
+    import csv
+    import io
+    s = SessionLocal()
+    try:
+        q = s.query(db.Audit)
+        if agent_key:
+            q = q.filter(db.Audit.agent_id == agent_key)
+        if action:
+            q = q.filter(db.Audit.action == action)
+        rows = q.order_by(db.Audit.id.desc()).limit(min(limit, 50000)).all()
+        names = dict(s.query(db.Agent.agent_key, db.Agent.email).all())
+        buf = io.StringIO()
+        buf.write("\ufeff")            # BOM，Excel 打开中文才不乱码
+        w = csv.writer(buf)
+        w.writerow(["id", "时间", "账号", "agent_key", "动作", "详情"])
+        for r in rows:
+            w.writerow([r.id, r.ts, names.get(r.agent_id, ""), r.agent_id,
+                        r.action, r.detail])
+        stamp = db.today().isoformat()
+        return StreamingResponse(
+            io.BytesIO(buf.getvalue().encode("utf-8")), media_type="text/csv",
+            headers={"Content-Disposition":
+                     f'attachment; filename="hivora-audit-{stamp}.csv"'})
     finally:
         s.close()
 

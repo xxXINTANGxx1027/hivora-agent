@@ -182,3 +182,89 @@ def test_both_apps_read_backend_from_meta():
         assert '<meta name="hivora-api"' in html
         assert "onrender.com" not in html.split("</head>")[1], \
             f"{'/'.join(path)} 的 body 里硬编码了后端地址"
+
+
+# ── 二次确认（服务端强制，不只靠前端弹窗）────────────────────
+def test_purge_needs_the_client_name_typed_out(app_client, admin_token, agent_factory):
+    """误调接口、脚本写错一样会删数据，所以确认要在服务端。"""
+    import db
+    tok, _ = agent_factory()
+    app_client.post("/api/clients", headers=H(tok), json={"name": "不该被误删的人"})
+    cid = app_client.get("/api/clients", headers=H(tok)).json()[0]["id"]
+
+    for bad in ({}, {"confirm": ""}, {"confirm": "随便打的"}):
+        r = app_client.post(f"/api/admin/clients/{cid}/purge",
+                            headers=H(admin_token), json=bad)
+        assert r.status_code == 400, bad
+    # 人还在
+    assert app_client.get("/api/clients", headers=H(tok)).json()[0]["id"] == cid
+
+    r = app_client.post(f"/api/admin/clients/{cid}/purge", headers=H(admin_token),
+                        json={"confirm": "不该被误删的人"})
+    assert r.status_code == 200
+    assert app_client.get("/api/clients", headers=H(tok)).json() == []
+
+
+def test_disabling_an_account_needs_the_email_typed_out(app_client, admin_token,
+                                                        agent_factory):
+    tok, email = agent_factory()
+    aid = _agent_id(app_client, admin_token, email)
+
+    r = app_client.post(f"/api/admin/agents/{aid}/toggle", headers=H(admin_token),
+                        json={"active": False})
+    assert r.status_code == 400 and email in r.json()["detail"]
+    assert app_client.get("/api/dashboard", headers=H(tok)).status_code == 200
+
+    r = app_client.post(f"/api/admin/agents/{aid}/toggle", headers=H(admin_token),
+                        json={"active": False, "confirm": email.upper()})
+    assert r.status_code == 200, "确认时大小写不该卡人"
+    assert app_client.get("/api/dashboard", headers=H(tok)).status_code == 403
+
+
+def test_re_enabling_needs_no_confirmation(app_client, admin_token, agent_factory):
+    """启用是无害操作，不该给管理员添麻烦。"""
+    tok, email = agent_factory()
+    aid = _agent_id(app_client, admin_token, email)
+    app_client.post(f"/api/admin/agents/{aid}/toggle", headers=H(admin_token),
+                    json={"active": False, "confirm": email})
+    r = app_client.post(f"/api/admin/agents/{aid}/toggle", headers=H(admin_token),
+                        json={"active": True})
+    assert r.status_code == 200
+    assert app_client.get("/api/dashboard", headers=H(tok)).status_code == 200
+
+
+# ── 审计日志导出 ──────────────────────────────────────────────
+def test_audit_exports_as_csv(app_client, admin_token, agent_factory):
+    import db
+    tok, email = agent_factory()
+    app_client.post("/api/clients", headers=H(tok), json={"name": "导出测试"})
+    s = db.SessionLocal()
+    try:
+        key = s.query(db.Agent).filter_by(email=email).first().agent_key
+    finally:
+        s.close()
+
+    r = app_client.get(f"/api/admin/audit/export?agent_key={key}",
+                       headers=H(admin_token))
+    assert r.status_code == 200
+    assert "text/csv" in r.headers["content-type"]
+    assert ".csv" in r.headers["content-disposition"]
+
+    body = r.content.decode("utf-8")
+    assert body.startswith("﻿"), "少了 BOM，Excel 打开中文会乱码"
+    lines = [l for l in body.splitlines() if l.strip()]
+    assert "动作" in lines[0] and "agent_key" in lines[0]
+    assert any("add_client" in l and "导出测试" in l for l in lines[1:])
+    assert all(key in l for l in lines[1:]), "筛了账号却混进了别人的记录"
+
+
+def test_audit_export_can_filter_by_action(app_client, admin_token):
+    r = app_client.get("/api/admin/audit/export?action=login&limit=50",
+                       headers=H(admin_token))
+    rows = [l for l in r.content.decode("utf-8").splitlines()[1:] if l.strip()]
+    assert rows and all(",login," in l for l in rows)
+
+
+def test_audit_export_requires_admin(app_client, agent_factory):
+    tok, _ = agent_factory()
+    assert app_client.get("/api/admin/audit/export", headers=H(tok)).status_code == 403

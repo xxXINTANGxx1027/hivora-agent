@@ -49,8 +49,8 @@ def test_disabled_agent_token_dies_immediately(app_client, admin_token, agent_fa
 
     agents = app_client.get("/api/admin/agents", headers=H(admin_token)).json()
     aid = next(a["id"] for a in agents if a["email"] == email)
-    app_client.post(f"/api/admin/agents/{aid}/toggle",
-                    headers=H(admin_token), json={"active": False})
+    app_client.post(f"/api/admin/agents/{aid}/toggle", headers=H(admin_token),
+                    json={"active": False, "confirm": email})
 
     assert app_client.get("/api/dashboard", headers=H(tok)).status_code == 403
 
