@@ -7,7 +7,7 @@
 <title>Hivora Admin · V0.1</title>
 <!-- 后端地址。换后端就改这一行。留空 = 同源。 -->
 <meta name="hivora-api" content="">
-<meta name="hivora-build" content="42c0422a4adc">
+<meta name="hivora-build" content="d4ea0bd162fd">
 <style>
   :root{
     --hivora:#1e6bf0; --hivora-dark:#1554c4; --hivora-light:#e8f0fe;
@@ -228,6 +228,8 @@ async function doLogin(){
   if(j.role!=="admin"){$("#lg-err").textContent="这是内部管理站，请用管理员账号登录";return;}
   localStorage.setItem("hivora_admin_token",j.token);
   localStorage.setItem("hivora_admin_name",j.name||"");
+  // 登录用的邮箱留着当各处的默认收件人——显示名（"Admin (XT)"）不是邮箱，填进去发不出去
+  localStorage.setItem("hivora_admin_email",$("#lg-email").value.trim());
   $("#login").classList.add("hide");
   boot();
 }
@@ -317,9 +319,12 @@ async function testEmail(){
           "SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASSWORD / SMTP_FROM");
     return;
   }
-  const to=prompt("发到哪个邮箱？（用来验证 SMTP 配好了没）",
-                  localStorage.getItem("hivora_admin_name")||"");
+  const to=(prompt("发到哪个邮箱？（用来验证 SMTP 配好了没）",
+                   localStorage.getItem("hivora_admin_email")||"")||"").trim();
   if(!to)return;
+  if(!/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(to)){
+    alert("这不像一个邮箱地址：\n\n"+to);return;
+  }
   try{
     await post("admin/email/test",{to});
     alert(`✅ 已发出，去 ${to} 收信。\n没收到就看垃圾箱。`);

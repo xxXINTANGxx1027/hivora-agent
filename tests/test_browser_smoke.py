@@ -233,6 +233,14 @@ def test_admin_tabs_all_clickable(admin_site, page):
     _assert_no_js_errors(page)
 
 
+def test_admin_remembers_the_login_email_not_the_display_name(admin_site, page):
+    """发测试邮件的默认收件人取这个值。以前取的是显示名（"Admin (XT)"），
+    照着点 OK 必然发不出去。"""
+    _login(page, admin_site, "admin@test.local", "Test-Admin-2026")
+    assert page.evaluate(
+        "() => localStorage.getItem('hivora_admin_email')") == "admin@test.local"
+
+
 def test_admin_rejects_non_admin_login(admin_site, page, agent_factory):
     """普通代理人拿自己的账号登管理站，必须被挡在门外。"""
     _, email = agent_factory()
