@@ -7,7 +7,7 @@
 <title>Hivora Admin · V0.1</title>
 <!-- 后端地址。换后端就改这一行。留空 = 同源。 -->
 <meta name="hivora-api" content="">
-<meta name="hivora-build" content="ee9fb5a83531">
+<meta name="hivora-build" content="42c0422a4adc">
 <style>
   :root{
     --hivora:#1e6bf0; --hivora-dark:#1554c4; --hivora-light:#e8f0fe;
@@ -303,7 +303,7 @@ async function loadSettings(){
   try{SETTINGS=await api("admin/settings");}catch(e){SETTINGS={};}
   const bad=[];
   if(SETTINGS.email_configured===false)
-    bad.push("没配 SMTP —— 建账号后不会自动发登录信，需要你手动把密码发给代理人");
+    bad.push("没配 SMTP —— 建账号后开通信不会自动发出，链接会显示在这里，需要你自己转给对方");
   if(SETTINGS.telegram_ready===false)
     bad.push("没配 PUBLIC_BASE_URL —— 代理人连不了自己的 Telegram bot，客户渠道用不了");
   $("#caps").innerHTML=bad.length
