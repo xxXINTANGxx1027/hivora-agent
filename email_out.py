@@ -1,19 +1,28 @@
 """开通邮件 —— 管理员建完账号，自动把登录信息发给代理人。
 
-用标准库 smtplib，不引第三方 SDK：任何邮箱服务商（Gmail 应用专用密码、
-Resend、SendGrid、自建）都提供 SMTP，换服务商只是改环境变量。
+两条发信通道，都只用标准库，不引第三方 SDK：
+
+* **HTTP API（Resend）** —— 配了 `RESEND_API_KEY` 就走这条，请求打 443。
+* **SMTP** —— 退路。配 `SMTP_HOST` 等一组变量。
+
+默认优先 HTTP，原因是实打实踩过的坑：**Render 免费档从 2025-09 起封了
+出站的 25 / 465 / 587**，SMTP 在 connect 阶段就超时，跟账号密码对不对无关。
+HTTP API 走 443，不受影响。付费实例上两条都能用。
 
 两条硬规则：
-1. **没配 SMTP 就整个降级为 no-op**，返回「没发」，绝不报错。
+1. **两条都没配就整个降级为 no-op**，返回「没发」，绝不报错。
 2. **发信失败绝不能让建账号失败。** 账号已经建好了，邮件只是通知手段；
-   发不出去时管理站会把凭据显示出来让管理员手动发。
+   发不出去时管理站会把链接显示出来让管理员手动发。
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import smtplib
 import ssl
+import urllib.error
+import urllib.request
 from email.message import EmailMessage
 
 log = logging.getLogger("hivora.email")
@@ -22,9 +31,15 @@ HOST = os.environ.get("SMTP_HOST", "").strip()
 PORT = int(os.environ.get("SMTP_PORT", "587"))
 USER = os.environ.get("SMTP_USER", "").strip()
 PASSWORD = os.environ.get("SMTP_PASSWORD", "")
-FROM = os.environ.get("SMTP_FROM", "").strip() or USER
 TIMEOUT = int(os.environ.get("SMTP_TIMEOUT", "10"))
 LOGIN_URL = os.environ.get("APP_LOGIN_URL", "https://hivora-frontend.vercel.app").rstrip("/")
+
+RESEND_KEY = os.environ.get("RESEND_API_KEY", "").strip()
+RESEND_URL = "https://api.resend.com/emails"
+# 发件人两条通道共用。没有自己的域名时可以先用 Resend 的 onboarding@resend.dev。
+FROM = (os.environ.get("MAIL_FROM", "").strip()
+        or os.environ.get("SMTP_FROM", "").strip()
+        or USER)
 
 
 def setup_link(token: str) -> str:
@@ -32,15 +47,50 @@ def setup_link(token: str) -> str:
     return f"{LOGIN_URL}/?setup={token}"
 
 
+def provider() -> str:
+    """当前生效的发信通道 —— 管理站拿它告诉你到底在走哪条路。"""
+    if not FROM:
+        return ""
+    if RESEND_KEY:
+        return "resend"
+    return "smtp" if HOST else ""
+
+
 def configured() -> bool:
-    return bool(HOST and FROM)
+    return bool(provider())
+
+
+def _send_resend(to: str, subject: str, body: str) -> bool:
+    req = urllib.request.Request(
+        RESEND_URL, method="POST",
+        data=json.dumps({"from": FROM, "to": [to],
+                         "subject": subject, "text": body}).encode("utf-8"),
+        headers={"Authorization": f"Bearer {RESEND_KEY}",
+                 "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+            return 200 <= r.status < 300
+    except urllib.error.HTTPError as e:
+        # 记服务商的原话（不含我们的正文），否则「发不出去」根本没法查
+        detail = (e.read() or b"")[:300].decode("utf-8", "replace")
+        log.warning("Resend 拒绝了这封信 to=%s status=%s %s", to, e.code, detail)
+        return False
+    except Exception:
+        log.warning("Resend 调不通 to=%s", to, exc_info=True)
+        return False
 
 
 def send(to: str, subject: str, body: str) -> bool:
     """发一封纯文本邮件。成功返回 True，其余一律 False —— 从不抛异常。"""
-    if not configured():
-        log.info("没配 SMTP，跳过发信 to=%s", to)
+    how = provider()
+    if not how:
+        log.info("没配发信通道，跳过发信 to=%s", to)
         return False
+    if how == "resend":
+        ok = _send_resend(to, subject, body)
+        if ok:
+            log.info("已发信 to=%s subject=%s via=resend", to, subject)
+        return ok
     msg = EmailMessage()
     msg["From"] = FROM
     msg["To"] = to

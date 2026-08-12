@@ -3,6 +3,8 @@
 最要紧的一条：**发信失败绝不能让建账号失败**。账号已经建好了，
 邮件只是通知手段；发不出去时管理站会把凭据显示出来让管理员手动发。
 """
+import json
+
 import pytest
 
 from conftest import H
@@ -49,6 +51,36 @@ def no_smtp(monkeypatch):
     import email_out
     monkeypatch.setattr(email_out, "HOST", "")
     monkeypatch.setattr(email_out, "FROM", "")
+    monkeypatch.setattr(email_out, "RESEND_KEY", "")
+
+
+@pytest.fixture
+def resend(monkeypatch):
+    """假的 Resend HTTP API：记下请求，不真的联网。"""
+    import email_out
+    calls = []
+
+    class FakeResp:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, timeout=None):
+        calls.append({"url": req.full_url, "method": req.get_method(),
+                      "headers": {k.lower(): v for k, v in req.header_items()},
+                      "json": json.loads(req.data.decode("utf-8"))})
+        return FakeResp()
+
+    monkeypatch.setattr(email_out.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(email_out, "RESEND_KEY", "re_test_key_123")
+    monkeypatch.setattr(email_out, "FROM", "Hivora <onboarding@resend.dev>")
+    monkeypatch.setattr(email_out, "HOST", "")      # 免费档上 SMTP 就是不可用的
+    return type("R", (), {"calls": calls,
+                          "mails": property(lambda self: [c["json"] for c in calls])})()
 
 
 def _create(app_client, admin_token, email, password="Welcome-2026x"):
@@ -113,6 +145,116 @@ def test_ssl_port_uses_smtp_ssl(app_client, admin_token, smtp, monkeypatch):
     import email_out
     monkeypatch.setattr(email_out, "PORT", 465)
     assert _create(app_client, admin_token, "ssl@test.local").json()["email_sent"] is True
+
+
+# ── HTTP 通道（Resend）──────────────────────────────────────────
+# 存在的理由是一次真实事故：Render 免费档从 2025-09 起封了出站 25/465/587，
+# SMTP 在 connect 就超时。HTTP API 走 443，不受影响。
+def test_resend_is_used_when_the_key_is_set(app_client, admin_token, resend):
+    r = _create(app_client, admin_token, "viahttp@test.local")
+    assert r.status_code == 200 and r.json()["email_sent"] is True
+
+    call = resend.calls[-1]
+    assert call["url"] == "https://api.resend.com/emails"
+    assert call["method"] == "POST"
+    assert call["headers"]["authorization"] == "Bearer re_test_key_123"
+    assert call["json"]["to"] == ["viahttp@test.local"]
+    assert call["json"]["from"] == "Hivora <onboarding@resend.dev>"
+    assert "?setup=" in call["json"]["text"]
+    assert "Welcome-2026x" not in call["json"]["text"], "密码不能进邮件"
+
+
+def test_http_channel_works_with_no_smtp_at_all(resend):
+    """免费档上根本连不上 SMTP —— 只有 key 也必须算「配好了」。"""
+    import email_out
+    assert email_out.HOST == ""
+    assert email_out.provider() == "resend"
+    assert email_out.configured() is True
+
+
+def test_resend_takes_precedence_over_smtp(app_client, admin_token, smtp, monkeypatch,
+                                           resend):
+    """两条都配了走 HTTP —— SMTP 是退路，不是首选。"""
+    monkeypatch.setattr(__import__("email_out"), "HOST", "smtp.example.com")
+    before = len(smtp.mails)
+    assert _create(app_client, admin_token, "both@test.local").json()["email_sent"] is True
+    assert len(resend.calls) == 1
+    assert len(smtp.mails) == before, "配了 key 还走 SMTP"
+
+
+def test_resend_rejection_never_fails_account_creation(app_client, admin_token,
+                                                       monkeypatch, caplog):
+    """服务商返回 4xx —— 账号照样建成功，原话记进日志好排查。"""
+    import urllib.error
+
+    import email_out
+
+    def boom(req, timeout=None):
+        raise urllib.error.HTTPError(
+            req.full_url, 422, "Unprocessable", {},
+            __import__("io").BytesIO(b'{"message":"The from address is not verified"}'))
+
+    monkeypatch.setattr(email_out.urllib.request, "urlopen", boom)
+    monkeypatch.setattr(email_out, "RESEND_KEY", "re_bad_key")
+    monkeypatch.setattr(email_out, "FROM", "noreply@unverified.test")
+    monkeypatch.setattr(email_out, "HOST", "")
+
+    with caplog.at_level("WARNING"):
+        r = _create(app_client, admin_token, "rejected@test.local",
+                    password="Sup3r-Secret-Pw")
+    assert r.status_code == 200 and r.json()["email_sent"] is False
+    assert "not verified" in caplog.text, "服务商的原话得留下来，否则没法查"
+    assert "re_bad_key" not in caplog.text, "API key 不能进日志"
+    assert "Sup3r-Secret-Pw" not in caplog.text
+    # 账号是真建出来了
+    assert app_client.post("/api/auth/login",
+                           json={"email": "rejected@test.local",
+                                 "password": "Sup3r-Secret-Pw"}).status_code == 200
+
+
+def test_resend_network_failure_is_swallowed(app_client, admin_token, monkeypatch):
+    import email_out
+
+    def boom(req, timeout=None):
+        raise OSError("connection reset")
+    monkeypatch.setattr(email_out.urllib.request, "urlopen", boom)
+    monkeypatch.setattr(email_out, "RESEND_KEY", "re_x")
+    monkeypatch.setattr(email_out, "FROM", "a@b.test")
+    monkeypatch.setattr(email_out, "HOST", "")
+    assert _create(app_client, admin_token,
+                   "netdown@test.local").json()["email_sent"] is False
+
+
+def test_settings_reports_which_channel_is_live(app_client, admin_token, resend):
+    j = app_client.get("/api/admin/settings", headers=H(admin_token)).json()
+    assert j["email_configured"] is True and j["email_provider"] == "resend"
+
+
+def test_settings_reports_smtp_when_that_is_the_channel(app_client, admin_token, smtp):
+    j = app_client.get("/api/admin/settings", headers=H(admin_token)).json()
+    assert j["email_provider"] == "smtp"
+
+
+def test_test_email_goes_through_the_http_channel(app_client, admin_token, resend):
+    r = app_client.post("/api/admin/email/test", headers=H(admin_token),
+                        json={"to": "me@test.local"})
+    assert r.status_code == 200
+    assert resend.calls[-1]["json"]["to"] == ["me@test.local"]
+
+
+def test_test_email_failure_points_at_the_right_channel(app_client, admin_token,
+                                                        monkeypatch):
+    import email_out
+    monkeypatch.setattr(email_out.urllib.request, "urlopen",
+                        lambda *a, **kw: (_ for _ in ()).throw(OSError("nope")))
+    monkeypatch.setattr(email_out, "RESEND_KEY", "re_x")
+    monkeypatch.setattr(email_out, "FROM", "a@b.test")
+    monkeypatch.setattr(email_out, "HOST", "")
+    r = app_client.post("/api/admin/email/test", headers=H(admin_token),
+                        json={"to": "me@test.local"})
+    assert r.status_code == 502
+    detail = r.json()["detail"]
+    assert "RESEND_API_KEY" in detail and "SMTP_HOST" not in detail
 
 
 # ── 重置密码 ──────────────────────────────────────────────────

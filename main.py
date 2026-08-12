@@ -1275,6 +1275,7 @@ def admin_set_quota(agent_id: int, req: QuotaReq, adm: str = ADM):
 def admin_settings(_: str = ADM):
     """管理站需要知道哪些能力已配好，才知道该提示什么。"""
     return dict(email_configured=email_out.configured(),
+                email_provider=email_out.provider(),   # resend / smtp / 空
                 login_url=email_out.LOGIN_URL,
                 telegram_ready=bool(os.environ.get("PUBLIC_BASE_URL")),
                 version=VERSION)
@@ -1286,14 +1287,15 @@ class TestMailReq(BaseModel):
 
 @app.post("/api/admin/email/test")
 def admin_test_email(req: TestMailReq, adm: str = ADM):
-    """配完 SMTP 用它验一下，不用为了试邮件去建个真账号。"""
+    """配完发信通道用它验一下，不用为了试邮件去建个真账号。"""
     if not email_out.configured():
-        raise HTTPException(400, "还没配 SMTP（SMTP_HOST / SMTP_FROM）")
+        raise HTTPException(400, "还没配发信通道（RESEND_API_KEY + MAIL_FROM，或 SMTP_HOST + SMTP_FROM）")
     to = req.to.strip()
     if "@" not in to:
         raise HTTPException(400, "收件地址不对")
+    how = email_out.provider()
     ok = email_out.send(to, "Hivora 邮件配置测试",
-                        "能看到这封信，说明 SMTP 配好了。\n\n"
+                        f"能看到这封信，说明发信配好了（通道：{how}）。\n\n"
                         "之后管理员创建账号时，代理人会自动收到开通信。\n\n—— Hivora")
     s = SessionLocal()
     try:
@@ -1302,7 +1304,13 @@ def admin_test_email(req: TestMailReq, adm: str = ADM):
     finally:
         s.close()
     if not ok:
-        raise HTTPException(502, "发送失败，检查 SMTP_HOST / 端口 / 账号密码，详见服务端日志")
+        raise HTTPException(502, f"发送失败（通道：{how}）。"
+                                 + ("检查 RESEND_API_KEY 和 MAIL_FROM 的域名是否已验证。"
+                                    if how == "resend" else
+                                    "检查 SMTP_HOST / 端口 / 账号密码。"
+                                    "注意 Render 免费档封了 25/465/587，"
+                                    "此时应改配 RESEND_API_KEY 走 HTTP。")
+                                 + "详见服务端日志")
     return {"ok": True}
 
 

@@ -7,7 +7,7 @@
 <title>Hivora Admin · V0.1</title>
 <!-- 后端地址。换后端就改这一行。留空 = 同源。 -->
 <meta name="hivora-api" content="">
-<meta name="hivora-build" content="d4ea0bd162fd">
+<meta name="hivora-build" content="73ffa9159e9e">
 <style>
   :root{
     --hivora:#1e6bf0; --hivora-dark:#1554c4; --hivora-light:#e8f0fe;
@@ -305,7 +305,8 @@ async function loadSettings(){
   try{SETTINGS=await api("admin/settings");}catch(e){SETTINGS={};}
   const bad=[];
   if(SETTINGS.email_configured===false)
-    bad.push("没配 SMTP —— 建账号后开通信不会自动发出，链接会显示在这里，需要你自己转给对方");
+    bad.push("没配发信通道 —— 建账号后开通信不会自动发出，链接会显示在这里，需要你自己转给对方。"
+             +"最省事的是 Resend：注册拿 key，Render 里填 RESEND_API_KEY + MAIL_FROM");
   if(SETTINGS.telegram_ready===false)
     bad.push("没配 PUBLIC_BASE_URL —— 代理人连不了自己的 Telegram bot，客户渠道用不了");
   $("#caps").innerHTML=bad.length
@@ -315,8 +316,12 @@ async function loadSettings(){
 }
 async function testEmail(){
   if(SETTINGS.email_configured===false){
-    alert("还没配 SMTP。\n\nRender Environment 里加：\n"+
-          "SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASSWORD / SMTP_FROM");
+    alert("还没配发信通道。二选一：\n\n"+
+          "① HTTP API（推荐，免费档也能用）\n"+
+          "   RESEND_API_KEY = re_...\n"+
+          "   MAIL_FROM      = Hivora <onboarding@resend.dev>\n\n"+
+          "② SMTP（Render 免费档封了 25/465/587，需要付费实例）\n"+
+          "   SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASSWORD / SMTP_FROM");
     return;
   }
   const to=(prompt("发到哪个邮箱？（用来验证 SMTP 配好了没）",
@@ -327,7 +332,7 @@ async function testEmail(){
   }
   try{
     await post("admin/email/test",{to});
-    alert(`✅ 已发出，去 ${to} 收信。\n没收到就看垃圾箱。`);
+    alert(`✅ 已发出（通道：${SETTINGS.email_provider||"?"}），去 ${to} 收信。\n没收到就看垃圾箱。`);
   }catch(e){
     alert("❌ "+(e.message||"发送失败"));
   }
