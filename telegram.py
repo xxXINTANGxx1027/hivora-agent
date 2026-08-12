@@ -7,10 +7,18 @@
 同一个 bot 服务两种人，靠有没有绑过码来分：
 
     绑过绑定码  → 代理人本人。提问走 ask()，当私人助手用
-    没绑过      → 客户。消息进收件箱，代理人确认后才回复
+    没绑过      → 客户。走下面的混合策略
 
-**AI 绝不自动回复客户。** 客户只会收到一句写死的回执，剩下的等代理人在
-Hivora 里确认。这是合规红线，也是这个产品本身的卖点。
+**客户侧是混合策略，不是全自动**（AGENTS.md 铁律 2）：
+
+    只有条款类问题才自动回，且必须查得到条款依据，回复带出处和免责声明。
+    以下一律进收件箱等真人：
+      · 理赔、核保、报价、推荐、投诉、退保 —— 涉及钱、涉及决定、涉及推荐
+      · 客户说「人工」
+      · 条款库里查不到依据
+      · 配额用完 / 模型不可用
+
+转人工的原因只写审计日志，**绝不发给客户** —— 里面可能是「本月配额用完了」。
 
 安全上有三道：
 1. token 用 Fernet 加密存，接口只回最后 4 位，永不明文回传
@@ -185,6 +193,8 @@ def unlink_chat(s, agent_id: str, row_id: int):
 CUSTOMER_ACK = os.environ.get(
     "TELEGRAM_CUSTOMER_ACK",
     "已收到你的消息，我会尽快回复你 🙏")
+# 转人工时给客户的话。**永远不能带上内部原因**——那里面可能是配额用完了。
+ESCALATED = "这个我帮你转给同事，稍后回复你 🙏"
 
 HELP = ("我是你的 Hivora 助手。直接问就行：\n"
         "· 张伟明有哪些保单？\n"
@@ -219,10 +229,13 @@ def notify_agent(s, agent_id: str, token: str, text: str):
 
 
 def _customer_message(s, bot, chat_id: str, name: str, text: str) -> None:
-    """客户发来的消息：只存进收件箱 + 提醒代理人。
+    """客户发来的消息。
 
-    **绝不在这里调 AI 回复客户。** 产品设计就是 AI 起草、代理人确认后再发，
-    这既是合规红线（AGENTS.md 铁律 2），也是这个产品的卖点本身。
+    混合策略（AGENTS.md 铁律 2）：**只有条款类问题**才自动回，且必须有条款依据、
+    带出处和免责声明。理赔/核保/报价/推荐/投诉，客户说「人工」，条款库查不到，
+    以及配额用完或模型挂了 —— 一律进收件箱等真人。
+
+    转人工的原因只写进审计日志，**绝不发给客户**。
     """
     ts = dt.datetime.now().strftime("%H:%M")
     t = (s.query(db.Thread)
@@ -243,10 +256,41 @@ def _customer_message(s, bot, chat_id: str, name: str, text: str) -> None:
     s.commit()
 
     token = decrypt(bot.token_enc)
+    brand = db.brand_of(bot.agent_id)
+
+    reply, why = (None, "该账号关掉了自动回复")
+    if _auto_reply_on(s, bot.agent_id):
+        from graph import customer_reply
+        try:
+            reply, why = customer_reply(text, bot.agent_id)
+        except Exception:
+            log.exception("自动回复出错 agent=%s", bot.agent_id)
+            reply, why = None, "内部：自动回复异常"
+
+    if reply:
+        s.add(db.Message(thread_id=t.id, role="ai", text=reply[:4000], ts=ts))
+        t.status = "sent"          # 客户已经收到答复了，不需要人再回一次
+        db.audit(s, bot.agent_id, "tg_auto_reply", f"chat={chat_id} {text[:60]}")
+        s.commit()
+        send(token, chat_id, reply)
+        notify_agent(s, bot.agent_id, token,
+                     f"🤖 已自动回复 {t.client}：{text[:80]}\n\n"
+                     f"到收件箱可复核。")
+        return
+
+    db.audit(s, bot.agent_id, "tg_escalate", f"chat={chat_id} 原因={why}")
+    s.commit()
     if first:
         send(token, chat_id, CUSTOMER_ACK)
+    else:
+        send(token, chat_id, ESCALATED)
     notify_agent(s, bot.agent_id, token,
-                 f"💬 {t.client}：{text[:120]}\n\n到 Hivora 收件箱确认后回复。")
+                 f"💬 {t.client}：{text[:120]}\n\n（{why}）到 {brand} 收件箱确认后回复。")
+
+
+def _auto_reply_on(s, agent_id: str) -> bool:
+    a = s.query(db.Agent).filter_by(agent_key=agent_id).first()
+    return bool(a and (a.auto_reply if a.auto_reply is not None else 1))
 
 
 def send_to_chat(s, agent_id: str, chat_id: str, text: str) -> bool:

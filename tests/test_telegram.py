@@ -117,9 +117,9 @@ def test_customer_message_lands_in_the_inbox(app_client, agent_factory, fake_tg)
     assert msgs[0]["text"] == "我的保单是不是快到期了？"
 
 
-def test_ai_never_auto_replies_to_a_customer(app_client, agent_factory, fake_tg,
-                                              monkeypatch):
-    """合规红线：AI 不直接面对客户。客户只该收到写死的回执，绝不能是模型输出。"""
+def test_no_policy_basis_means_no_auto_reply(app_client, agent_factory, fake_tg,
+                                             monkeypatch):
+    """条款库里查不到依据就绝不能开口——宁可转人工，也不许猜。"""
     import db
     import graph
     import telegram
@@ -128,8 +128,7 @@ def test_ai_never_auto_replies_to_a_customer(app_client, agent_factory, fake_tg,
     key, row = _bot_row(email)
 
     def must_not_run(*a, **kw):
-        raise AssertionError("客户消息触发了模型调用")
-    monkeypatch.setattr(graph, "ask", must_not_run)
+        raise AssertionError("没有条款依据却调了模型")
     monkeypatch.setattr(graph, "llm_text", must_not_run)
 
     s = db.SessionLocal()
@@ -141,10 +140,186 @@ def test_ai_never_auto_replies_to_a_customer(app_client, agent_factory, fake_tg,
 
     replies = [t for c, t in fake_tg.sent if c == "555002"]
     assert replies == [telegram.CUSTOMER_ACK], replies
-
     tid = app_client.get("/api/inbox", headers=H(tok)).json()[0]["id"]
     msgs = app_client.get(f"/api/inbox/{tid}", headers=H(tok)).json()["messages"]
-    assert all(m["role"] == "customer" for m in msgs), "收件箱里出现了 AI 自动回复"
+    assert all(m["role"] == "customer" for m in msgs)
+
+
+def _with_policy_doc(app_client, tok):
+    app_client.post("/api/documents", headers=H(tok),
+                    files={"file": ("terms.txt",
+                                    "本产品的一般等待期为 30 天，特定疾病 120 天。" * 4,
+                                    "text/plain")},
+                    data={"product": "TestPlan"})
+
+
+def test_policy_question_gets_answered_with_citation(app_client, agent_factory,
+                                                     fake_tg, monkeypatch):
+    """有依据的条款问题：自动回，且必须带出处和免责声明。"""
+    import db
+    import graph
+    import telegram
+    tok, email = agent_factory()
+    _connect(app_client, tok)
+    _with_policy_doc(app_client, tok)
+    key, row = _bot_row(email)
+    monkeypatch.setattr(graph, "llm_text", lambda p, agent_id="": "一般等待期是 30 天。")
+
+    s = db.SessionLocal()
+    try:
+        telegram.handle_update(s, row.path_secret, row.header_secret,
+                               _update("等待期多久？", "556001", "问条款的客户"))
+    finally:
+        s.close()
+
+    reply = [t for c, t in fake_tg.sent if c == "556001"][-1]
+    assert "30 天" in reply
+    assert "📄" in reply, "自动回复必须带出处"
+    assert graph.DISCLAIMER.strip() in reply, "必须带免责声明"
+    assert "人工" in reply, "必须给客户一条转人工的出路"
+
+    th = app_client.get("/api/inbox", headers=H(tok)).json()[0]
+    assert th["status"] == "sent"
+    msgs = app_client.get(f"/api/inbox/{th['id']}", headers=H(tok)).json()["messages"]
+    assert [m["role"] for m in msgs] == ["customer", "ai"], "自动回复要留痕，代理人能复核"
+
+
+@pytest.mark.parametrize("q", [
+    "我要理赔，怎么弄？",
+    "这个能核保通过吗",
+    "帮我报价，多少钱",
+    "你觉得哪家好？推荐哪个",
+    "我要投诉",
+    "我想退保",
+])
+def test_sensitive_topics_always_go_to_a_human(app_client, agent_factory, fake_tg,
+                                               monkeypatch, q):
+    """涉及钱、涉及决定、涉及推荐 —— 一律转人工，哪怕条款库里查得到。"""
+    import db
+    import graph
+    import telegram
+    tok, email = agent_factory()
+    _connect(app_client, tok)
+    _with_policy_doc(app_client, tok)
+    key, row = _bot_row(email)
+
+    def must_not_run(*a, **kw):
+        raise AssertionError(f"敏感话题却调了模型：{q}")
+    monkeypatch.setattr(graph, "llm_text", must_not_run)
+
+    s = db.SessionLocal()
+    try:
+        telegram.handle_update(s, row.path_secret, row.header_secret,
+                               _update(q, "557001", "客户"))
+    finally:
+        s.close()
+    tid = app_client.get("/api/inbox", headers=H(tok)).json()[0]["id"]
+    msgs = app_client.get(f"/api/inbox/{tid}", headers=H(tok)).json()["messages"]
+    assert all(m["role"] == "customer" for m in msgs)
+
+
+def test_customer_can_always_ask_for_a_human(app_client, agent_factory, fake_tg,
+                                             monkeypatch):
+    import db
+    import graph
+    import telegram
+    tok, email = agent_factory()
+    _connect(app_client, tok)
+    _with_policy_doc(app_client, tok)
+    key, row = _bot_row(email)
+    monkeypatch.setattr(graph, "llm_text",
+                        lambda p, agent_id="": (_ for _ in ()).throw(
+                            AssertionError("客户要人工却调了模型")))
+    s = db.SessionLocal()
+    try:
+        telegram.handle_update(s, row.path_secret, row.header_secret,
+                               _update("等待期多久？我要人工", "558001", "客户"))
+    finally:
+        s.close()
+    tid = app_client.get("/api/inbox", headers=H(tok)).json()[0]["id"]
+    msgs = app_client.get(f"/api/inbox/{tid}", headers=H(tok)).json()["messages"]
+    assert all(m["role"] == "customer" for m in msgs)
+
+
+def test_quota_exhaustion_is_never_shown_to_the_customer(app_client, agent_factory,
+                                                         fake_tg):
+    """配额用完是我们的内部问题，客户只该看到「转给同事」。"""
+    import db
+    import telegram
+    tok, email = agent_factory()
+    _connect(app_client, tok)
+    _with_policy_doc(app_client, tok)
+    key, row = _bot_row(email)
+    s = db.SessionLocal()
+    try:
+        a = s.query(db.Agent).filter_by(agent_key=key).first()
+        a.token_quota = 1
+        s.commit()
+    finally:
+        s.close()
+    db.record_usage(key, "m", 50, 50)
+
+    s = db.SessionLocal()
+    try:
+        telegram.handle_update(s, row.path_secret, row.header_secret,
+                               _update("等待期多久？", "559001", "客户"))
+    finally:
+        s.close()
+    to_customer = " ".join(t for c, t in fake_tg.sent if c == "559001")
+    for leak in ("上限", "quota", "tokens", "配额"):
+        assert leak not in to_customer, f"把内部信息「{leak}」发给客户了"
+
+
+def test_escalation_reason_is_only_in_the_audit_log(app_client, agent_factory, fake_tg,
+                                                    monkeypatch):
+    import db
+    import graph
+    import telegram
+    tok, email = agent_factory()
+    _connect(app_client, tok)
+    key, row = _bot_row(email)
+    s = db.SessionLocal()
+    try:
+        telegram.handle_update(s, row.path_secret, row.header_secret,
+                               _update("我要理赔", "560001", "客户"))
+    finally:
+        s.close()
+    s = db.SessionLocal()
+    try:
+        row_a = (s.query(db.Audit).filter_by(agent_id=key, action="tg_escalate")
+                 .order_by(db.Audit.id.desc()).first())
+        assert row_a and "原因=" in row_a.detail
+    finally:
+        s.close()
+
+
+def test_auto_reply_can_be_turned_off_per_account(app_client, agent_factory, fake_tg,
+                                                  monkeypatch):
+    import db
+    import graph
+    import telegram
+    tok, email = agent_factory()
+    _connect(app_client, tok)
+    _with_policy_doc(app_client, tok)
+    key, row = _bot_row(email)
+    s = db.SessionLocal()
+    try:
+        s.query(db.Agent).filter_by(agent_key=key).first().auto_reply = 0
+        s.commit()
+    finally:
+        s.close()
+    monkeypatch.setattr(graph, "llm_text",
+                        lambda p, agent_id="": (_ for _ in ()).throw(
+                            AssertionError("关掉了自动回复却还是调了模型")))
+    s = db.SessionLocal()
+    try:
+        telegram.handle_update(s, row.path_secret, row.header_secret,
+                               _update("等待期多久？", "561001", "客户"))
+    finally:
+        s.close()
+    tid = app_client.get("/api/inbox", headers=H(tok)).json()[0]["id"]
+    msgs = app_client.get(f"/api/inbox/{tid}", headers=H(tok)).json()["messages"]
+    assert all(m["role"] == "customer" for m in msgs)
 
 
 def test_only_the_first_customer_message_gets_an_ack(app_client, agent_factory, fake_tg):

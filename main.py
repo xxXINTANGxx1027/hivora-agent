@@ -238,6 +238,42 @@ def dashboard(aid: str = AID):
         s.close()
 
 
+class BrandReq(BaseModel):
+    brand: str = ""
+    auto_reply: bool | None = None
+
+
+@app.get("/api/brand")
+def get_brand(aid: str = AID):
+    """白牌：界面标题、AI 自称、给客户的消息都用这个名字。"""
+    s = SessionLocal()
+    try:
+        a = s.query(db.Agent).filter_by(agent_key=aid).first()
+        return dict(brand=db.brand_of(aid),
+                    is_default=not (a and (a.brand or "").strip()),
+                    auto_reply=bool(a.auto_reply if a and a.auto_reply is not None else 1))
+    finally:
+        s.close()
+
+
+@app.post("/api/brand")
+def set_brand(req: BrandReq, aid: str = AID):
+    s = SessionLocal()
+    try:
+        a = s.query(db.Agent).filter_by(agent_key=aid).first()
+        if not a:
+            raise HTTPException(404)
+        if req.brand is not None:
+            a.brand = req.brand.strip()[:120]
+        if req.auto_reply is not None:
+            a.auto_reply = 1 if req.auto_reply else 0
+        db.audit(s, aid, "set_brand", f"{a.brand}:auto_reply={a.auto_reply}")
+        s.commit()
+        return dict(ok=True, brand=db.brand_of(aid), auto_reply=bool(a.auto_reply))
+    finally:
+        s.close()
+
+
 @app.get("/api/onboarding")
 def onboarding(aid: str = AID):
     """新账号是空的，前四步决定他会不会留下来。"""
@@ -1026,7 +1062,8 @@ def admin_agents(_: str = ADM):
                      active=bool(a.active), plan=a.plan, expires=a.expires or "",
                      agent_key=a.agent_key, clients=counts.get(a.agent_key, 0),
                      tokens=int(used.get(a.agent_key, 0) or 0),
-                     token_quota=a.token_quota or 0)
+                     token_quota=a.token_quota or 0, brand=a.brand or "",
+                     auto_reply=bool(a.auto_reply if a.auto_reply is not None else 1))
                 for a in s.query(db.Agent).order_by(db.Agent.id).all()]
     finally:
         s.close()
@@ -1241,6 +1278,7 @@ class CreateAgentReq(BaseModel):
     password: str
     name: str = ""
     plan: str = "paid"
+    brand: str = ""          # 白牌：公司名
 
 
 @app.post("/api/admin/agents/create")
@@ -1256,7 +1294,7 @@ def admin_create_agent(req: CreateAgentReq, adm: str = ADM):
         salt = _s.token_hex(16)
         name = req.name or email.split("@")[0]
         s.add(db.Agent(agent_key="ag_" + _s.token_hex(8), email=email,
-                       name=name,
+                       name=name, brand=req.brand.strip()[:120],
                        pw_hash=auth.hash_pw(req.password, salt), salt=salt,
                        plan=req.plan or "paid"))
         db.audit(s, adm, "admin_create_agent", email)

@@ -638,7 +638,7 @@ const I18N={
   pick_thread:"← 选择一个对话",reply_ph:"自己写，或点上面的建议回复填入…",
   tg_thread:"✈️ Telegram",tg_sent:"✅ 已发到客户的 Telegram",
   lead:"新线索",to_client:"＋ 加为客户",m_link:"把线索转成客户",
-  tg_getcode:"生成绑定码",tg_open:"打开 Telegram",loading:"载入中",
+  tg_getcode:"生成绑定码",tg_open:"打开 Telegram",loading:"载入中",ai_auto:"🤖 自动回复",
   tg_waiting:"等待绑定… 绑好这里会自己变。绑定码 10 分钟内有效。",
   tg_expired:"绑定码可能已过期，重新生成一个。",
   f_link_to:"关联到",new_client_opt:"➕ 新建客户（用下面的信息）",
@@ -687,7 +687,7 @@ const I18N={
   pick_thread:"← Pick a conversation",reply_ph:"Type your reply, or click a suggestion above…",
   tg_thread:"✈️ Telegram",tg_sent:"✅ Sent to the client on Telegram",
   lead:"New lead",to_client:"＋ Add as client",m_link:"Turn lead into a client",
-  tg_getcode:"Get a link code",tg_open:"Open Telegram",loading:"Loading",
+  tg_getcode:"Get a link code",tg_open:"Open Telegram",loading:"Loading",ai_auto:"🤖 Auto-replied",
   tg_waiting:"Waiting for the link… this updates by itself. The code expires in 10 minutes.",
   tg_expired:"The code has probably expired — generate a new one.",
   f_link_to:"Link to",new_client_opt:"➕ Create new (using the fields below)",
@@ -719,7 +719,16 @@ async function doAuth(){
   localStorage.setItem("hivora_token",j.token);
   localStorage.setItem("hivora_name",j.name||"");
   $("#login-overlay").classList.add("hide");
+  applyBrand();
   applyLang();
+}
+let BRAND="";
+async function applyBrand(){
+  try{const b=await api("brand");BRAND=b.brand||"";}catch(e){return;}
+  if(!BRAND)return;
+  document.title=BRAND+" · Insurance Agent";
+  const el=$(".brand b"); if(el)el.textContent=BRAND;
+  const lg=$(".brand .logo"); if(lg)lg.textContent=BRAND.trim()[0]||"H";
 }
 function logout(msg){localStorage.removeItem("hivora_token");showLogin();
   if(msg)$("#lg-err").textContent=msg;}
@@ -1016,7 +1025,9 @@ async function openThread(id){
       <span class="pill blue" style="margin-left:auto">${esc(th.lang)}</span>
       ${human?`<span class="pill due">${t("human")}</span>`:''}</div>
     <div class="thr-msgs">${th.messages.map(m=>
-      `<div class="m ${m.role==="agent"?"agent":"customer"}">${esc(m.text)}<div style="font-size:10px;opacity:.6;margin-top:3px">${esc(m.ts)}</div></div>`).join("")}</div>
+      `<div class="m ${m.role==="customer"?"customer":"agent"}">${
+         m.role==="ai"?`<div style="font-size:10px;opacity:.75;margin-bottom:3px">${t("ai_auto")}</div>`:""
+       }${esc(m.text)}<div style="font-size:10px;opacity:.6;margin-top:3px">${esc(m.ts)}</div></div>`).join("")}</div>
     <div class="thr-foot" id="thr-foot">
       ${th.status==="sent"?`<div class="sub" style="margin:0 0 8px">${t("sent_note")}</div>`:toolbar}
       <div class="row">
@@ -1502,7 +1513,7 @@ async function custSend(){
 }
 $("#cust-in").addEventListener("keydown",e=>{if(e.key==="Enter")custSend()});
 
-if(!TOKEN())showLogin();
+if(!TOKEN())showLogin(); else applyBrand();
 applyLang();
 </script>
 </body>

@@ -22,8 +22,19 @@ Python + FastAPI + LangGraph + SQLAlchemy 后端，单文件 HTML SPA 前端。
 ## 铁律（违反=事故）
 1. **数据隔离**：任何涉及 clients/policies/appointments/facts/threads/documents 的查询，
    必须 `filter_by(agent_id=...)`，agent_id 只能来自 `auth.current_agent` 依赖，绝不信任请求体。
-2. **合规**：不得实现"跨保险公司比价/推荐哪家好"功能（BNM 监管红线）；
-   Policy/ClientBook 的 AI 回答必须经 Compliance 节点加免责声明；条款查不到就说查不到。
+2. **合规（2026-08-12 改过，别按旧版本理解）**：
+   不得实现"跨保险公司比价/推荐哪家好"（BNM 红线）；条款查不到就说查不到。
+
+   **面向客户是混合策略，不是全自动、也不再是全人工**：
+   - 只有**条款类**问题才自动回，且必须查得到依据，回复带出处 + 免责声明 +
+     一条「回复『人工』找真人」的出路
+   - 以下一律进收件箱等真人：理赔 / 核保 / 报价 / 推荐 / 投诉 / 退保、
+     客户说「人工」、条款库无依据、配额用完、模型不可用
+   - **转人工的原因绝不能发给客户** —— 里面可能是「本月配额用完了」
+   - 判断逻辑集中在 `graph.customer_reply()`，改它之前先看
+     `tests/test_telegram.py` 里那一组合规测试
+
+   面向代理人本人（绑过码的 Telegram、网页 dashboard）不受此限，照常回答。
 3. **密钥**：绝不把 API key/连接串写进代码或提交 git。用 .env（本地）/ Render Environment（云端）。
    `server/.env` 在 .gitignore 里，保持这样。
 4. **审计**：新增的写操作和 AI 动作要调用 `db.audit(session, agent_id, action, detail)`。
@@ -45,13 +56,15 @@ Python + FastAPI + LangGraph + SQLAlchemy 后端，单文件 HTML SPA 前端。
 11. **列表接口**：一律用 `_capped(rows, 名字, aid)` 收口。截断要打日志——
     静默丢数据会让人以为"就这么多"。
 12. **聚合用 SQL**：统计类查询别把整表拉进内存再数（dashboard 原来就这么干的）。
-13. **Telegram**：客户渠道 + 代理人助手共用一个 bot（代理人自己在 BotFather 建）。
+13. **白牌**：界面标题、AI 自称、给客户的消息一律走 `db.brand_of(agent_id)`，
+    **不要再往代码里写死 "Hivora"**。租户没设就回落 `DEFAULT_BRAND`。
+14. **Telegram**：客户渠道 + 代理人助手共用一个 bot（代理人自己在 BotFather 建）。
     - **绑过码 = 代理人本人**，提问走 `ask()`，配额/合规/审计照常
     - **没绑过 = 客户**，消息只进收件箱，**绝不能让 AI 自动回复**（铁律 2）。
       客户只收到 `telegram.CUSTOMER_ACK` 这句写死的回执
     - token 用 Fernet 加密存、接口只回后 4 位；webhook 靠随机路径 + secret header 认身份
     - 代理人在网页点发送 → 通过 `telegram.send_to_chat` 真的发回客户
-14. **线索 vs 客户**：客户是主动找上门的，第一次接触时还不在库里。
+15. **线索 vs 客户**：客户是主动找上门的，第一次接触时还不在库里。
     `Thread.client_id` 为空 = 新线索。`_ctx_for` 优先按 `client_id` 取档案，
     没关联才按名字兜底 —— 所以「加为客户」不只是整理数据，它决定了 AI 起草
     能不能看到这个人的保单。
