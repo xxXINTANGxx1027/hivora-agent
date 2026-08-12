@@ -201,7 +201,9 @@ def drafting_prompt(state) -> str:
 
 
 def chat_prompt(state) -> str:
-    return ("你是 Hivora Insurance Agent，服务马来西亚保险代理人，"
+    # 白牌：AI 自称用租户自己的品牌，不写死 Hivora
+    brand = db.brand_of(state["agent_id"])
+    return (f"你是 {brand} 的保险助手，服务马来西亚保险代理人，"
             "能查条款、管客户保单、写三语话术、帮忙录入数据。自然简短地回应：\n" + _q(state))
 
 
@@ -359,6 +361,50 @@ def action_node(state):
                 "citations": []}
     finally:
         s.close()
+
+
+# ── 面向客户的自动回复 ────────────────────────────────────────
+# 只回「有条款依据」的问题。这几类一律转人工：涉及钱、涉及决定、涉及推荐。
+SENSITIVE = ["理赔", "赔付", "拒赔", "claim", "核保", "underwrit", "报价", "quote",
+             "多少钱", "保费是", "投诉", "complaint", "退保", "surrender", "解约",
+             "比价", "哪家好", "哪个好", "推荐哪", "值不值", "该买", "建议我"]
+ASK_HUMAN = ["人工", "真人", "agent", "human", "找你", "打电话", "call me"]
+
+
+def customer_reply(question: str, agent_id: str) -> tuple[str | None, str]:
+    """客户问题该不该自动回。
+
+    返回 (回复文本 或 None, 原因)。None 表示转人工——**调用方绝不能把原因
+    透给客户**，那是内部信息（可能是配额用完了）。
+    """
+    q = (question or "").strip()
+    low = q.lower()
+    if any(k in low for k in ASK_HUMAN):
+        return None, "客户要求人工"
+    if any(k in low for k in SENSITIVE):
+        return None, "涉及理赔/核保/报价/推荐，按规矩转人工"
+
+    chunks = search_policy_chunks(q, agent_id)
+    if not chunks:
+        return None, "条款库里没有依据"
+
+    brand = db.brand_of(agent_id)
+    ctx = "\n\n".join(f"[出处{i+1}] {c['product']} 第{c['page']}页：{c['text']}"
+                      for i, c in enumerate(chunks))
+    prompt = (f"你是 {brand} 的保险客服，正在直接回复一位客户。\n"
+              "只根据下面的条款片段回答，用客户听得懂的话，两三句话说完。\n"
+              "绝对不要：给购买建议、比较哪家公司好、判断能不能理赔、报价或估算保费。\n"
+              "条款片段里没写的，就说这部分需要同事跟进，不要猜。\n\n"
+              f"{ctx}\n\n客户问：{q}")
+    try:
+        ans = llm_text(prompt, agent_id)
+    except (LLMUnavailable, QuotaExceeded) as e:
+        # 配额用完 / 模型挂了 —— 客户不该知道，静默转人工
+        return None, f"内部：{e}"
+
+    cites = " ".join(f"📄 {c['product']}·第{c['page']}页" for c in chunks)
+    return (f"{ans}\n\n{cites}{DISCLAIMER}\n"
+            f"（自动回复。需要真人请回复「人工」）"), "已自动回复"
 
 
 def _log_chat(agent_id: str, route: str, question: str):

@@ -266,6 +266,21 @@ def cost_usd(prompt_tokens: int, completion_tokens: int) -> float:
     return round(prompt_tokens / 1e6 * PRICE_IN + completion_tokens / 1e6 * PRICE_OUT, 4)
 
 
+DEFAULT_BRAND = os.environ.get("DEFAULT_BRAND", "Hivora")
+
+
+def brand_of(agent_id: str) -> str:
+    """该租户的品牌名。白牌：界面标题、AI 自称、给客户的消息都用它。"""
+    if not agent_id:
+        return DEFAULT_BRAND
+    s = SessionLocal()
+    try:
+        a = s.query(Agent).filter_by(agent_key=agent_id).first()
+        return (a.brand or "").strip() if a and (a.brand or "").strip() else DEFAULT_BRAND
+    finally:
+        s.close()
+
+
 def audit(s, agent_id, action, detail=""):
     """审计日志。agent_id 必填——只能来自 auth.current_agent，不接受请求体传入。"""
     s.add(Audit(agent_id=agent_id or "unknown", action=action, detail=str(detail)[:500],
@@ -362,6 +377,8 @@ class Agent(Base):
     plan = Column(String(32), default="trial")
     expires = Column(String(10), default="")        # YYYY-MM-DD，空=不限
     token_quota = Column(Integer, default=0)        # 月度 token 上限；0=用全局默认，-1=不限
+    brand = Column(String(120), default="")         # 白牌：公司名 / AI 自称。空=用默认
+    auto_reply = Column(Integer, default=1)         # 条款问题是否自动回客户
 
 
 class Document(Base):
@@ -423,6 +440,8 @@ def migrate_columns():
             "ALTER TABLE facts ADD COLUMN deleted VARCHAR(24) DEFAULT ''",
             "ALTER TABLE documents ADD COLUMN deleted VARCHAR(24) DEFAULT ''",
             "ALTER TABLE agents ADD COLUMN token_quota INTEGER DEFAULT 0",
+            "ALTER TABLE agents ADD COLUMN brand VARCHAR(120) DEFAULT ''",
+            "ALTER TABLE agents ADD COLUMN auto_reply INTEGER DEFAULT 1",
             "ALTER TABLE threads ADD COLUMN channel VARCHAR(16) DEFAULT 'manual'",
             "ALTER TABLE threads ADD COLUMN tg_chat_id VARCHAR(32) DEFAULT ''",
             "ALTER TABLE threads ADD COLUMN client_id INTEGER",

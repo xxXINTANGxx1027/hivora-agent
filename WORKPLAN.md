@@ -101,6 +101,36 @@ APP_LOGIN_URL     # 信里给的登录地址
 
 ---
 
+## 🚧 WP-7 · 混合自动回复 + 白牌（进行中，做了一半）
+
+**已定的产品决策**（2026-08-12，项目所有者拍板）
+- 租户 = 一家公司 = **一个 AI agent**（一个 Telegram bot）+ 一个 dashboard
+- 客户在 Telegram 直接跟这个 AI 聊；**条款类问题自动回，其余转人工**
+- 白牌范围：**公司名 + AI 自称可配**（不做 logo / 主题色 / 自定义域名）
+- 密码改成**发链接让用户自己设**，不再明文发密码
+
+**已经落地的（可用，但还没接线）**
+- `db.Agent.brand` / `db.Agent.auto_reply` 两列 + 迁移
+- `db.brand_of(agent_id)` —— 取租户品牌，空则回落 `DEFAULT_BRAND`
+- `graph.customer_reply(question, agent_id)` —— 返回 `(回复 或 None, 原因)`。
+  敏感词（理赔/核保/报价/推荐/投诉/退保）一律 None；客户说「人工」一律 None；
+  条款库没依据一律 None；配额用完或模型挂了也返回 None。
+  **原因字段绝不能透给客户**，里面可能有内部信息。
+- `graph.chat_prompt` 的 AI 自称已改成用 brand
+
+**还没做的**
+1. `telegram._customer_message` 接上 `customer_reply`：能自动回就回并存成一条
+   `role="ai"` 的消息（前端要给 ai 气泡加「🤖 自动回复」标记）；
+   转人工则维持现状（进收件箱 + 推送提醒代理人）
+2. 自动回复后 `thread.status="sent"`、`unread` 仍 +1（代理人要能复核）
+3. 品牌接口：`GET/POST /api/brand`，admin 建账号时可带 `brand`
+4. 客户端读 brand 替换标题/侧栏/页脚；`CUSTOMER_ACK` 也用 brand
+5. **改写 AGENTS.md 铁律 2**——现在写的是「AI 绝不面对客户」，与新决策冲突
+6. 改写 `test_ai_never_auto_replies_to_a_customer`：非条款问题仍不许碰模型；
+   新增「条款问题会自动回且带出处+免责声明」「敏感词强制转人工」
+   「客户回『人工』强制转人工」「配额用完静默转人工、不能告诉客户」
+7. 设密码链接（一次性 token，24-48h 过期）替换明文密码邮件
+
 ## WP-3 · 向量检索（pgvector）
 
 **为什么**：条款问答是产品的头号卖点，现在是中文 2-gram 关键词打分。
