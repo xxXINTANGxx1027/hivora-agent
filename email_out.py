@@ -27,6 +27,11 @@ TIMEOUT = int(os.environ.get("SMTP_TIMEOUT", "10"))
 LOGIN_URL = os.environ.get("APP_LOGIN_URL", "https://hivora-frontend.vercel.app").rstrip("/")
 
 
+def setup_link(token: str) -> str:
+    """设密码页的完整地址。前端用 ?setup=<token> 识别。"""
+    return f"{LOGIN_URL}/?setup={token}"
+
+
 def configured() -> bool:
     return bool(HOST and FROM)
 
@@ -63,17 +68,19 @@ def send(to: str, subject: str, body: str) -> bool:
 
 
 # ── 具体的信 ──────────────────────────────────────────────────
-def welcome(to: str, name: str, password: str) -> bool:
-    """开通信。密码是明文——这封信就是发给本人的开通通知。"""
+def welcome(to: str, name: str, link: str, brand: str = "Hivora") -> bool:
+    """开通信。**给的是一次性链接，不是密码** —— 密码不该走邮件。"""
     body = f"""{name or to} 你好，
 
-你的 Hivora 账号已经开通了。
+你的 {brand} 账号已经开通了。点下面的链接设置你自己的密码：
 
-登录地址：{LOGIN_URL}
+{link}
+
+（链接 48 小时内有效，只能用一次。过期了找管理员重发。）
+
 账号：{to}
-密码：{password}
 
-登录之后，建议按这四步把它变成你自己的助手：
+设好密码进去之后，建议按这四步把它变成你自己的助手：
 
 1. 上传你常用的条款 PDF —— 之后问条款会带出处，查不到就说查不到，不会编
 2. 把常卖的产品加进产品目录
@@ -82,22 +89,24 @@ def welcome(to: str, name: str, password: str) -> bool:
 
 有问题直接回这封邮件。
 
-—— Hivora
+—— {brand}
 """
-    return send(to, "你的 Hivora 账号已开通", body)
+    return send(to, f"你的 {brand} 账号已开通", body)
 
 
-def password_reset(to: str, name: str, password: str) -> bool:
+def password_reset(to: str, name: str, link: str, brand: str = "Hivora") -> bool:
     body = f"""{name or to} 你好，
 
-你的 Hivora 密码已被管理员重置。
+管理员给你重置了 {brand} 的密码。点下面的链接设置新密码：
 
-登录地址：{LOGIN_URL}
+{link}
+
+（链接 48 小时内有效，只能用一次。）
+
 账号：{to}
-新密码：{password}
 
 如果这不是你要求的，请立刻联系管理员。
 
-—— Hivora
+—— {brand}
 """
-    return send(to, "你的 Hivora 密码已重置", body)
+    return send(to, f"你的 {brand} 密码重置链接", body)

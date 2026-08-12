@@ -65,8 +65,11 @@ def test_welcome_email_goes_out_on_account_creation(app_client, admin_token, smt
     mail = [x for x in smtp.sent if "to" in x][-1]
     assert mail["to"] == "newbie@test.local"
     assert "开通" in mail["subject"]
-    assert "Welcome-2026x" in mail["body"], "信里得有密码，不然收信人登不进去"
     assert "newbie@test.local" in mail["body"]
+    # 给的是一次性链接，**密码绝不能出现在邮件里**
+    assert "Welcome-2026x" not in mail["body"]
+    assert "?setup=" in mail["body"], "信里得有设密码的链接"
+    assert r.json()["setup_link"].startswith("http")
 
 
 def test_welcome_email_tells_them_what_to_do_next(app_client, admin_token, smtp):
@@ -119,10 +122,10 @@ def test_password_reset_notifies_the_owner(app_client, admin_token, agent_factor
                                                headers=H(admin_token)).json()
                if a["email"] == email)
     r = app_client.post(f"/api/admin/agents/{aid}/password", headers=H(admin_token),
-                        json={"password": "Reset-Me-2026"})
+                        json={})
     assert r.json()["email_sent"] is True
     mail = [x for x in smtp.sent if "to" in x][-1]
-    assert mail["to"] == email and "Reset-Me-2026" in mail["body"]
+    assert mail["to"] == email and "?setup=" in mail["body"]
 
 
 def test_password_reset_can_skip_the_email(app_client, admin_token, agent_factory, smtp):
@@ -210,3 +213,94 @@ def test_test_email_requires_admin(app_client, agent_factory):
     tok, _ = agent_factory()
     assert app_client.post("/api/admin/email/test", headers=H(tok),
                            json={"to": "x@y.z"}).status_code == 403
+
+
+# ── 设密码链接 ────────────────────────────────────────────────
+def _setup_link_token(app_client, admin_token, email):
+    r = app_client.post("/api/admin/agents/create", headers=H(admin_token),
+                        json={"email": email, "name": "新公司"})
+    assert r.status_code == 200
+    return r.json()["setup_link"].split("?setup=")[1]
+
+
+def test_account_created_without_a_password_cannot_be_logged_into(app_client,
+                                                                  admin_token, no_smtp):
+    """不给密码时账号先不可登录 —— 等对方点链接自己设。"""
+    _setup_link_token(app_client, admin_token, "pending@test.local")
+    r = app_client.post("/api/auth/login",
+                        json={"email": "pending@test.local", "password": ""})
+    assert r.status_code in (401, 429)
+
+
+def test_setup_link_lets_the_owner_choose_a_password(app_client, admin_token, no_smtp):
+    tok = _setup_link_token(app_client, admin_token, "choose@test.local")
+
+    who = app_client.post("/api/auth/setup/check", json={"token": tok}).json()
+    assert who["email"] == "choose@test.local" and who["kind"] == "welcome"
+
+    r = app_client.post("/api/auth/setup",
+                        json={"token": tok, "password": "My-Own-Pass-2026"})
+    assert r.status_code == 200 and r.json()["token"], "设完密码应该直接登录"
+
+    assert app_client.post("/api/auth/login",
+                           json={"email": "choose@test.local",
+                                 "password": "My-Own-Pass-2026"}).status_code == 200
+
+
+def test_setup_link_is_single_use(app_client, admin_token, no_smtp):
+    tok = _setup_link_token(app_client, admin_token, "once@test.local")
+    assert app_client.post("/api/auth/setup",
+                           json={"token": tok, "password": "First-Pass-2026"}
+                           ).status_code == 200
+    r = app_client.post("/api/auth/setup",
+                        json={"token": tok, "password": "Second-Pass-2026"})
+    assert r.status_code == 400
+    # 第二次没生效，第一次设的还能用
+    assert app_client.post("/api/auth/login",
+                           json={"email": "once@test.local",
+                                 "password": "First-Pass-2026"}).status_code == 200
+
+
+def test_expired_setup_link_is_refused(app_client, admin_token, no_smtp):
+    import db
+    tok = _setup_link_token(app_client, admin_token, "stale@test.local")
+    s = db.SessionLocal()
+    try:
+        s.query(db.SetupToken).filter_by(token=tok).first().expires = 0
+        s.commit()
+    finally:
+        s.close()
+    assert app_client.post("/api/auth/setup/check",
+                           json={"token": tok}).status_code == 400
+    assert app_client.post("/api/auth/setup",
+                           json={"token": tok, "password": "Too-Late-2026"}
+                           ).status_code == 400
+
+
+def test_bogus_setup_token_is_refused(app_client):
+    assert app_client.post("/api/auth/setup/check",
+                           json={"token": "made-up"}).status_code == 400
+
+
+def test_setup_rejects_a_short_password(app_client, admin_token, no_smtp):
+    tok = _setup_link_token(app_client, admin_token, "shortpw@test.local")
+    assert app_client.post("/api/auth/setup",
+                           json={"token": tok, "password": "1234567"}
+                           ).status_code == 400
+
+
+def test_issuing_a_new_link_invalidates_the_old_one(app_client, admin_token, no_smtp):
+    """重发链接后，旧链接必须立刻失效。"""
+    old = _setup_link_token(app_client, admin_token, "reissue@test.local")
+    aid = next(a["id"] for a in app_client.get("/api/admin/agents",
+                                               headers=H(admin_token)).json()
+               if a["email"] == "reissue@test.local")
+    new = (app_client.post(f"/api/admin/agents/{aid}/password", headers=H(admin_token),
+                           json={}).json()["setup_link"].split("?setup=")[1])
+    assert new != old
+    assert app_client.post("/api/auth/setup",
+                           json={"token": old, "password": "Old-Link-2026"}
+                           ).status_code == 400
+    assert app_client.post("/api/auth/setup",
+                           json={"token": new, "password": "New-Link-2026"}
+                           ).status_code == 200

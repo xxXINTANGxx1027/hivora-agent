@@ -141,6 +141,49 @@ def login(s, email: str, password: str) -> dict:
     return dict(token=make_token(a.agent_key), name=a.name, role=a.role or "agent")
 
 
+# ── 设密码链接 ────────────────────────────────────────────────
+SETUP_TTL_HOURS = int(os.environ.get("SETUP_LINK_HOURS", "48"))
+
+
+def new_setup_token(s, agent_id: str, kind: str = "welcome") -> str:
+    """一次性链接。同一个账号只留最新的一张，旧的作废。"""
+    s.query(db.SetupToken).filter_by(agent_id=agent_id, used="").delete()
+    tok = secrets.token_urlsafe(32)
+    s.add(db.SetupToken(token=tok, agent_id=agent_id, kind=kind,
+                        expires=time.time() + SETUP_TTL_HOURS * 3600))
+    s.commit()
+    return tok
+
+
+def peek_setup(s, token: str) -> dict:
+    """校验链接。不泄露账号是否存在之外的任何信息。"""
+    row = s.query(db.SetupToken).filter_by(token=(token or "").strip()).first()
+    if not row or row.used or row.expires < time.time():
+        raise HTTPException(400, "链接无效或已过期，请联系管理员重新发送")
+    a = s.query(db.Agent).filter_by(agent_key=row.agent_id).first()
+    if not a:
+        raise HTTPException(400, "链接无效或已过期，请联系管理员重新发送")
+    return dict(email=a.email, name=a.name, kind=row.kind)
+
+
+def consume_setup(s, token: str, password: str) -> dict:
+    if len(password) < 8:
+        raise HTTPException(400, "密码至少 8 位")
+    row = s.query(db.SetupToken).filter_by(token=(token or "").strip()).first()
+    if not row or row.used or row.expires < time.time():
+        raise HTTPException(400, "链接无效或已过期，请联系管理员重新发送")
+    a = s.query(db.Agent).filter_by(agent_key=row.agent_id).first()
+    if not a:
+        raise HTTPException(400, "链接无效或已过期，请联系管理员重新发送")
+    salt = secrets.token_hex(16)
+    a.pw_hash, a.salt = hash_pw(password, salt), salt
+    row.used = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    _clear_lock(s, a.email)
+    db.audit(s, a.agent_key, "set_password", a.email)
+    s.commit()
+    return dict(token=make_token(a.agent_key), name=a.name, role=a.role or "agent")
+
+
 # ── 初始账号 ────────────────────────────────────────────────
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "").strip().lower()
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")

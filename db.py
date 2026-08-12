@@ -158,6 +158,16 @@ class TelegramBind(Base):
     expires = Column(Float, default=0.0)
 
 
+class SetupToken(Base):
+    """开通/重置密码用的一次性链接。密码不再走邮件明文。"""
+    __tablename__ = "setup_tokens"
+    token = Column(String(64), primary_key=True)
+    agent_id = Column(String(64), index=True)
+    kind = Column(String(16), default="welcome")   # welcome / reset
+    expires = Column(Float, default=0.0)
+    used = Column(String(24), default="")
+
+
 class LoginLock(Base):
     """登录失败计数。落库而不是放进程内存 —— 否则扩到第二个实例就形同虚设。"""
     __tablename__ = "login_locks"

@@ -524,11 +524,22 @@
       <div class="logo" style="width:34px;height:34px;border-radius:9px;background:var(--hivora);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800">H</div>
       <div><b style="font-size:16px">Hivora</b><div class="sub" style="margin:0">Insurance Agent · V0.1</div></div>
     </div>
+    <div id="setup-box" class="hide">
+      <div class="sub" style="margin-bottom:10px" id="setup-who"></div>
+      <div class="mfield"><label>设置密码 / Set password</label>
+        <input id="su-pw" type="password" placeholder="至少 8 位" autocomplete="new-password"></div>
+      <div class="mfield"><label>再输一次 / Confirm</label>
+        <input id="su-pw2" type="password" autocomplete="new-password"></div>
+      <div class="merr" id="su-err"></div>
+      <button class="btn" style="width:100%" onclick="doSetup()">设置并登录 / Set &amp; sign in</button>
+    </div>
+    <div id="login-box">
     <div class="mfield"><label>Login ID</label><input id="lg-email" placeholder="账号 / Login ID"></div>
     <div class="mfield"><label>密码 / Password</label><input id="lg-pw" type="password" placeholder="至少 8 位"></div>
     <div class="merr" id="lg-err"></div>
     <button class="btn" style="width:100%;margin-top:6px" id="lg-btn" onclick="doAuth()">登录 / Login</button>
     <div class="sub" style="margin-top:12px">账号由管理员发放，购买请联系管理员</div>
+    </div>
   </div>
 </div>
 
@@ -709,6 +720,41 @@ const I18N={
 };
 let LANG=localStorage.getItem("hivora_lang")||"zh";
 function showLogin(){$("#login-overlay").classList.remove("hide");}
+
+/* ── 设密码（邮件里的一次性链接 ?setup=xxx）── */
+const SETUP_TOKEN=new URLSearchParams(location.search).get("setup")||"";
+async function initSetup(){
+  if(!SETUP_TOKEN)return false;
+  showLogin();
+  const r=await fetch(API_BASE+"/api/auth/setup/check",{method:"POST",
+    headers:{"Content-Type":"application/json"},body:JSON.stringify({token:SETUP_TOKEN})});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){$("#lg-err").textContent=j.detail||"链接无效或已过期";return false;}
+  $("#login-box").classList.add("hide");
+  $("#setup-box").classList.remove("hide");
+  $("#setup-who").textContent=`为 ${j.email} 设置密码`;
+  $("#su-pw").focus();
+  return true;
+}
+async function doSetup(){
+  const a=$("#su-pw").value,b=$("#su-pw2").value;
+  $("#su-err").textContent="";
+  if(a.length<8){$("#su-err").textContent="密码至少 8 位";return;}
+  if(a!==b){$("#su-err").textContent="两次输入不一致";return;}
+  const r=await fetch(API_BASE+"/api/auth/setup",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({token:SETUP_TOKEN,password:a})});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){$("#su-err").textContent=j.detail||"设置失败";return;}
+  localStorage.setItem("hivora_token",j.token);
+  localStorage.setItem("hivora_name",j.name||"");
+  history.replaceState({},"",location.pathname);   // 别把 token 留在地址栏
+  $("#login-overlay").classList.add("hide");
+  $("#setup-box").classList.add("hide");
+  $("#login-box").classList.remove("hide");
+  applyBrand(); applyLang();
+}
+$("#su-pw2").addEventListener("keydown",e=>{if(e.key==="Enter")doSetup();});
 async function doAuth(){
   $("#lg-err").textContent="";
   const body={email:$("#lg-email").value.trim(),password:$("#lg-pw").value};
@@ -1513,7 +1559,9 @@ async function custSend(){
 }
 $("#cust-in").addEventListener("keydown",e=>{if(e.key==="Enter")custSend()});
 
-if(!TOKEN())showLogin(); else applyBrand();
+if(SETUP_TOKEN){initSetup();}
+else if(!TOKEN())showLogin();
+else applyBrand();
 applyLang();
 </script>
 </body>

@@ -879,6 +879,31 @@ class AuthReq(BaseModel):
     password: str
 
 
+class SetupReq(BaseModel):
+    token: str
+    password: str = ""
+
+
+@app.post("/api/auth/setup/check")
+def api_setup_check(req: SetupReq):
+    """打开设密码页时先校验链接，顺便把账号显示出来。"""
+    s = SessionLocal()
+    try:
+        return auth.peek_setup(s, req.token)
+    finally:
+        s.close()
+
+
+@app.post("/api/auth/setup")
+def api_setup(req: SetupReq):
+    """用一次性链接设密码，成功直接返回登录态。"""
+    s = SessionLocal()
+    try:
+        return auth.consume_setup(s, req.token, req.password)
+    finally:
+        s.close()
+
+
 @app.post("/api/auth/login")
 def api_login(req: AuthReq):
     s = SessionLocal()
@@ -1091,8 +1116,8 @@ def admin_toggle(agent_id: int, req: ToggleReq, adm: str = ADM):
 
 
 class PasswordReq(BaseModel):
-    password: str
-    notify: bool = True      # 是否把新密码发信告知本人
+    password: str = ""       # 留空 = 发链接让对方自己设（推荐）
+    notify: bool = True
 
 
 @app.post("/api/admin/agents/{agent_id}/password")
@@ -1103,14 +1128,17 @@ def admin_reset_password(agent_id: int, req: PasswordReq, adm: str = ADM):
         a = s.query(db.Agent).filter_by(id=agent_id).first()
         if not a:
             raise HTTPException(404, "账号不存在")
-        if len(req.password) < 8:
-            raise HTTPException(400, "密码至少 8 位")
-        salt = _secrets.token_hex(16)
-        a.pw_hash, a.salt = auth.hash_pw(req.password, salt), salt
+        if req.password:
+            if len(req.password) < 8:
+                raise HTTPException(400, "密码至少 8 位")
+            salt = _secrets.token_hex(16)
+            a.pw_hash, a.salt = auth.hash_pw(req.password, salt), salt
         db.audit(s, adm, "reset_password", a.email)
         s.commit()
-        sent = req.notify and email_out.password_reset(a.email, a.name, req.password)
-        return {"ok": True, "email_sent": bool(sent),
+        link = email_out.setup_link(auth.new_setup_token(s, a.agent_key, "reset"))
+        sent = bool(req.notify and email_out.password_reset(
+            a.email, a.name, link, db.brand_of(a.agent_key)))
+        return {"ok": True, "email_sent": sent, "setup_link": link,
                 "email_configured": email_out.configured()}
     finally:
         s.close()
@@ -1275,10 +1303,10 @@ def admin_clients(agent_key: str, _: str = ADM):
 
 class CreateAgentReq(BaseModel):
     email: str
-    password: str
     name: str = ""
     plan: str = "paid"
     brand: str = ""          # 白牌：公司名
+    password: str = ""       # 留空 = 发链接让对方自己设（推荐）
 
 
 @app.post("/api/admin/agents/create")
@@ -1287,24 +1315,30 @@ def admin_create_agent(req: CreateAgentReq, adm: str = ADM):
     s = SessionLocal()
     try:
         email = req.email.strip().lower()
-        if not email or len(req.password) < 8:
-            raise HTTPException(400, "账号必填，密码至少 8 位")
+        if not email or "@" not in email:
+            raise HTTPException(400, "请填一个有效的邮箱")
+        if req.password and len(req.password) < 8:
+            raise HTTPException(400, "密码至少 8 位")
         if s.query(db.Agent).filter_by(email=email).first():
             raise HTTPException(400, "该账号已存在")
         salt = _s.token_hex(16)
         name = req.name or email.split("@")[0]
-        s.add(db.Agent(agent_key="ag_" + _s.token_hex(8), email=email,
+        key = "ag_" + _s.token_hex(8)
+        # 不给密码时塞一个随机的：账号先不可登录，等对方点链接自己设
+        s.add(db.Agent(agent_key=key, email=email,
                        name=name, brand=req.brand.strip()[:120],
-                       pw_hash=auth.hash_pw(req.password, salt), salt=salt,
-                       plan=req.plan or "paid"))
+                       pw_hash=auth.hash_pw(req.password or _s.token_urlsafe(32), salt),
+                       salt=salt, plan=req.plan or "paid"))
         db.audit(s, adm, "admin_create_agent", email)
         s.commit()
+
+        link = email_out.setup_link(auth.new_setup_token(s, key, "welcome"))
         # 账号已经建好了。发信只是通知手段，发不出去也不能让这个接口失败——
-        # 管理站会把凭据显示出来让管理员手动发。
-        sent = email_out.welcome(email, name, req.password)
+        # 管理站会把链接显示出来让管理员手动发。
+        sent = email_out.welcome(email, name, link, db.brand_of(key))
         db.audit(s, adm, "welcome_email", f"{email}:{'sent' if sent else 'skipped'}")
         s.commit()
-        return {"ok": True, "email_sent": sent,
+        return {"ok": True, "email_sent": sent, "setup_link": link,
                 "email_configured": email_out.configured()}
     finally:
         s.close()

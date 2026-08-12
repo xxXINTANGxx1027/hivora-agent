@@ -35,36 +35,39 @@ Python + FastAPI + LangGraph + SQLAlchemy 后端，单文件 HTML SPA 前端。
      `tests/test_telegram.py` 里那一组合规测试
 
    面向代理人本人（绑过码的 Telegram、网页 dashboard）不受此限，照常回答。
-3. **密钥**：绝不把 API key/连接串写进代码或提交 git。用 .env（本地）/ Render Environment（云端）。
+3. **密码不走邮件**：开通和重置都发一次性链接（`auth.new_setup_token`，48 小时、
+   只能用一次、重发即作废），对方点进 `?setup=<token>` 自己设。
+   `email_out` 里绝不能再出现明文密码。
+4. **密钥**：绝不把 API key/连接串写进代码或提交 git。用 .env（本地）/ Render Environment（云端）。
    `server/.env` 在 .gitignore 里，保持这样。
-4. **审计**：新增的写操作和 AI 动作要调用 `db.audit(session, agent_id, action, detail)`。
+5. **审计**：新增的写操作和 AI 动作要调用 `db.audit(session, agent_id, action, detail)`。
    `agent_id` 必填且只能来自 `auth.current_agent` / `auth.current_admin`。
-5. **前端转义**：任何服务端数据（客户名、消息正文、文件名、**LLM 输出**）进 `innerHTML`
+6. **前端转义**：任何服务端数据（客户名、消息正文、文件名、**LLM 输出**）进 `innerHTML`
    前必须过 `esc()`。客户发一条带 `<img onerror>` 的 WhatsApp 消息就能偷走 token。
-6. **产品目录也是租户数据**：`products` 表有 `agent_id`，读写都要带上。
-7. **虚构条款**：`knowledge.POLICY_CHUNKS` 是假的示例条款，只给演示账号。
+7. **产品目录也是租户数据**：`products` 表有 `agent_id`，读写都要带上。
+8. **虚构条款**：`knowledge.POLICY_CHUNKS` 是假的示例条款，只给演示账号。
    绝不能让真实用户拿到——AI 会带着"第X页"的出处引用它们。
-8. **前端同步**：`server/static/index.html` 是唯一来源。改完跑 `./sync-frontend.sh`
+9. **前端同步**：`server/static/index.html` 是唯一来源。改完跑 `./sync-frontend.sh`
    生成 `frontend/index.html`（只有 `<meta name="hivora-api">` 不同），**不要手动 cp**。
    两个 repo 都装了 pre-push 钩子，不同步会拒绝 push。
-9. **软删**：clients/policies/appointments/facts/documents 都有 `deleted` 列。
+10. **软删**：clients/policies/appointments/facts/documents 都有 `deleted` 列。
    任何面向用户的读取都要包 `db.live(query, Model)`，否则删掉的数据会漏回来。
    彻底删除只走 `/api/admin/clients/{id}/purge`（PDPA 被遗忘权）。
-10. **LLM 调用**：一律走 `graph.llm_text(prompt, agent_id)` / `graph.llm_tokens(...)`，
+11. **LLM 调用**：一律走 `graph.llm_text(prompt, agent_id)` / `graph.llm_tokens(...)`，
     它们带超时、重试、并发闸门、**配额检查和 token 记账**。直接 `llm.invoke()`
     会绕过全部保护，还会让这个客户的成本统计凭空少一块。
-11. **列表接口**：一律用 `_capped(rows, 名字, aid)` 收口。截断要打日志——
+12. **列表接口**：一律用 `_capped(rows, 名字, aid)` 收口。截断要打日志——
     静默丢数据会让人以为"就这么多"。
-12. **聚合用 SQL**：统计类查询别把整表拉进内存再数（dashboard 原来就这么干的）。
-13. **白牌**：界面标题、AI 自称、给客户的消息一律走 `db.brand_of(agent_id)`，
+13. **聚合用 SQL**：统计类查询别把整表拉进内存再数（dashboard 原来就这么干的）。
+14. **白牌**：界面标题、AI 自称、给客户的消息一律走 `db.brand_of(agent_id)`，
     **不要再往代码里写死 "Hivora"**。租户没设就回落 `DEFAULT_BRAND`。
-14. **Telegram**：客户渠道 + 代理人助手共用一个 bot（代理人自己在 BotFather 建）。
+15. **Telegram**：客户渠道 + 代理人助手共用一个 bot（代理人自己在 BotFather 建）。
     - **绑过码 = 代理人本人**，提问走 `ask()`，配额/合规/审计照常
     - **没绑过 = 客户**，消息只进收件箱，**绝不能让 AI 自动回复**（铁律 2）。
       客户只收到 `telegram.CUSTOMER_ACK` 这句写死的回执
     - token 用 Fernet 加密存、接口只回后 4 位；webhook 靠随机路径 + secret header 认身份
     - 代理人在网页点发送 → 通过 `telegram.send_to_chat` 真的发回客户
-15. **线索 vs 客户**：客户是主动找上门的，第一次接触时还不在库里。
+16. **线索 vs 客户**：客户是主动找上门的，第一次接触时还不在库里。
     `Thread.client_id` 为空 = 新线索。`_ctx_for` 优先按 `client_id` 取档案，
     没关联才按名字兜底 —— 所以「加为客户」不只是整理数据，它决定了 AI 起草
     能不能看到这个人的保单。

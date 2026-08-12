@@ -18,7 +18,8 @@ def _login(page, base, email, pw):
     page.wait_for_selector(f"{box}:not(.hide)", timeout=15000)
     page.fill("#lg-email", email)
     page.fill("#lg-pw", pw)
-    page.click(f"{box} button")
+    # 登录浮层里现在不止一个按钮（还有设密码那个），得指名道姓
+    page.click("#lg-btn" if page.locator("#lg-btn").count() else f"{box} button")
     page.wait_for_selector(box, state="hidden", timeout=15000)
     page.hivora_errors.clear()   # 只关心登录之后的交互有没有报错
 
@@ -228,11 +229,15 @@ def test_admin_create_account_modal_works(admin_site, page):
     _login(page, admin_site, "admin@test.local", "Test-Admin-2026")
     page.click("text=＋ 创建账号")
     page.wait_for_selector("#modal:not(.hide)", timeout=10000)
+    # 建账号不再输密码 —— 发一次性链接让对方自己设
+    assert page.locator("#f-password").count() == 0, "建账号表单不该再有密码字段"
     page.fill("#f-email", "browser-made@test.local")
-    page.fill("#f-password", "Browser-Made-2026")
+    page.fill("#f-brand", "浏览器公司")
     page.fill("#f-name", "浏览器建的")
+    page.once("dialog", lambda d: d.accept())      # handover 的提示框
     page.click("#m-save")
     page.wait_for_selector("#modal", state="hidden", timeout=15000)
     page.wait_for_selector("text=browser-made@test.local", timeout=10000)
+    assert "浏览器公司" in page.locator("#tb-agents").inner_text()
     _assert_nothing_covers_the_page(page)
     _assert_no_js_errors(page)
