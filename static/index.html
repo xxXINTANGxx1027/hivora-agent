@@ -638,6 +638,9 @@ const I18N={
   pick_thread:"← 选择一个对话",reply_ph:"自己写，或点上面的建议回复填入…",
   tg_thread:"✈️ Telegram",tg_sent:"✅ 已发到客户的 Telegram",
   lead:"新线索",to_client:"＋ 加为客户",m_link:"把线索转成客户",
+  tg_getcode:"生成绑定码",tg_open:"打开 Telegram",loading:"载入中",
+  tg_waiting:"等待绑定… 绑好这里会自己变。绑定码 10 分钟内有效。",
+  tg_expired:"绑定码可能已过期，重新生成一个。",
   f_link_to:"关联到",new_client_opt:"➕ 新建客户（用下面的信息）",
   reply_ph_human:"人工回复…",sugg_pick:"点击填入",sugg_styles:["💼 专业详细","😊 亲切热情","⚡ 简短快捷"],
   suggesting:"Hivora 生成 3 条建议中",thinking:"Hivora 思考中",analyzing:"Hivora 分析中",
@@ -684,6 +687,9 @@ const I18N={
   pick_thread:"← Pick a conversation",reply_ph:"Type your reply, or click a suggestion above…",
   tg_thread:"✈️ Telegram",tg_sent:"✅ Sent to the client on Telegram",
   lead:"New lead",to_client:"＋ Add as client",m_link:"Turn lead into a client",
+  tg_getcode:"Get a link code",tg_open:"Open Telegram",loading:"Loading",
+  tg_waiting:"Waiting for the link… this updates by itself. The code expires in 10 minutes.",
+  tg_expired:"The code has probably expired — generate a new one.",
   f_link_to:"Link to",new_client_opt:"➕ Create new (using the fields below)",
   reply_ph_human:"Reply manually…",sugg_pick:"click to use",sugg_styles:["💼 Professional","😊 Friendly","⚡ Short & quick"],
   suggesting:"Hivora is drafting 3 suggestions",thinking:"Hivora is thinking",analyzing:"Hivora is analyzing",
@@ -1164,11 +1170,12 @@ $("#fact-in").addEventListener("keydown",e=>{if(e.key==="Enter")addFact()});
 
 /* ── Telegram ── */
 function openTg(){$("#tg-overlay").classList.remove("hide");loadTg();}
-function closeTg(){$("#tg-overlay").classList.add("hide");}
+function closeTg(){$("#tg-overlay").classList.add("hide");tgStopPoll();}
 async function loadTg(){
-  $("#tg-body").innerHTML=`<div class="thinking">载入中</div>`;
-  const t=await api("telegram");
-  $("#tg-body").innerHTML=t.connected?tgConnected(t):tgSetup();
+  $("#tg-body").innerHTML=`<div class="thinking">${t("loading")}</div>`;
+  const st=await api("telegram");
+  tgChatsBefore=(st.chats||[]).length;
+  $("#tg-body").innerHTML=st.connected?tgConnected(st):tgSetup();
 }
 function tgSetup(){
   return `<div class="sub" style="margin-bottom:14px">
@@ -1185,15 +1192,15 @@ function tgSetup(){
     <div class="merr" id="tg-err"></div>
     <div class="sub" style="margin-top:10px">token 会加密保存，页面上永远只显示后 4 位。</div>`;
 }
-function tgConnected(t){
-  const chats=(t.chats||[]).map(c=>`<div class="doc-row">📱 <b>${esc(c.name||c.chat_id)}</b>
+function tgConnected(st){
+  const chats=(st.chats||[]).map(c=>`<div class="doc-row">📱 <b>${esc(c.name||c.chat_id)}</b>
       <span class="meta">${esc(c.created)}</span>
       <button class="icobtn" onclick="tgUnlink(${Number(c.id)})" aria-label="unlink">🗑</button>
     </div>`).join("");
-  const link=`https://t.me/${t.username}`;
+  const link=`https://t.me/${st.username}`;
   return `<div class="doc-row" style="margin-bottom:14px">
-      ✅ 已连接 <b>@${esc(t.username)}</b>
-      <span class="meta">token ${esc(t.token_hint)} · ${esc(t.since)}</span>
+      ✅ 已连接 <b>@${esc(st.username)}</b>
+      <span class="meta">token ${esc(st.token_hint)} · ${esc(st.since)}</span>
       <button class="btn ghost" style="padding:4px 10px;font-size:11px"
         onclick="tgDisconnect()">断开</button></div>
     <div style="background:var(--hivora-light);border-radius:10px;padding:12px 14px;
@@ -1211,10 +1218,10 @@ function tgConnected(t){
     ${chats||`<span class="sub">还没有设备绑定。点下面拿绑定码。</span>`}
     <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)">
       <div style="margin-bottom:10px"><span class="step-n">1</span>
-        在 Telegram 打开 <b>@${esc(t.username)}</b>，点 Start</div>
+        在 Telegram 打开 <b>@${esc(st.username)}</b>，点 Start</div>
       <div style="margin-bottom:10px"><span class="step-n">2</span>
         把下面这个码发给它（10 分钟内有效）</div>
-      <div id="tg-code-box"><button class="btn" onclick="tgCode()">生成绑定码</button></div>
+      <div id="tg-code-box"><button class="btn" onclick="tgCode()">${t("tg_getcode")}</button></div>
     </div>`;
 }
 async function tgConnect(){
@@ -1225,9 +1232,35 @@ async function tgConnect(){
 }
 async function tgCode(){
   const r=await post("telegram/bindcode");
-  $("#tg-code-box").innerHTML=`<span class="tg-code">${esc(r.code)}</span>
-    <div class="sub" style="margin-top:8px">发给 @${esc(r.username)} 即可绑定</div>`;
+  /* 深链：Telegram 打开后会自动发 /start <code>，不用手动复制。
+     复制那条留着做兜底——桌面版没装 app 时深链打不开。 */
+  const deep=`https://t.me/${encodeURIComponent(r.username)}?start=${encodeURIComponent(r.code)}`;
+  $("#tg-code-box").innerHTML=`
+    <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
+      <a class="btn" href="${esc(deep)}" target="_blank" rel="noopener"
+         style="text-decoration:none">${t("tg_open")}</a>
+      <span class="tg-code" style="font-size:14px">/start ${esc(r.code)}</span>
+    </div>
+    <div class="sub" style="margin-top:8px" id="tg-wait">${t("tg_waiting")}</div>`;
+  tgPoll(r.code);
 }
+let tgTimer=null;
+function tgStopPoll(){if(tgTimer){clearInterval(tgTimer);tgTimer=null;}}
+function tgPoll(code){
+  /* 绑定成功了页面要自己变——别让人点开又回来猜成没成 */
+  tgStopPoll();
+  const before=Date.now();
+  tgTimer=setInterval(async()=>{
+    if($("#tg-overlay").classList.contains("hide")||Date.now()-before>600000){
+      tgStopPoll();
+      const w=$("#tg-wait"); if(w)w.textContent=t("tg_expired");
+      return;
+    }
+    let st; try{st=await api("telegram");}catch(e){tgStopPoll();return;}
+    if((st.chats||[]).length>(tgChatsBefore??0)){tgStopPoll();loadTg();}
+  },3000);
+}
+let tgChatsBefore=0;
 async function tgUnlink(id){
   if(!confirm("解除这台设备的绑定？"))return;
   await post("telegram/unlink",{id}); loadTg();
