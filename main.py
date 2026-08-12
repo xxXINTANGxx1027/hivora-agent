@@ -123,6 +123,16 @@ def index():
     return FileResponse(BASE_DIR / "static" / "index.html")
 
 
+# 管理站跟后端同源 —— 省掉 CORS 白名单，也省掉一个单独的托管项目。
+# 这份是 admin/index.html 由 sync-frontend.sh 生成的副本，后端地址写成空串，
+# 所以它调的永远是自己所在的域名。页面本身不含任何密钥，进去要管理员口令。
+@app.get("/console")
+@app.get("/console/")
+def console():
+    return FileResponse(BASE_DIR / "static" / "console.html",
+                        headers={"X-Robots-Tag": "noindex, nofollow"})
+
+
 # Render 会注入 RENDER_GIT_COMMIT；本地跑就是空。用来确认线上到底是哪一版。
 BUILD = (os.environ.get("RENDER_GIT_COMMIT")
          or os.environ.get("HIVORA_BUILD", ""))[:12]

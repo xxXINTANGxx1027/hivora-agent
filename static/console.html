@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Hivora Admin · V0.1</title>
+<!-- 后端地址。换后端就改这一行。留空 = 同源。 -->
+<meta name="hivora-api" content="">
+<meta name="hivora-build" content="ee9fb5a83531">
+<style>
+  :root{
+    --hivora:#1e6bf0; --hivora-dark:#1554c4; --hivora-light:#e8f0fe;
+    --bg:#f4f7fc; --panel:#fff; --line:#e2e9f5; --text:#17233c; --dim:#64748f;
+    --green:#0e9f6e; --orange:#e8930c; --red:#e0552f;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
+       background:var(--bg);color:var(--text);font-size:14px;line-height:1.55}
+  .hide{display:none!important}
+
+  header{background:var(--panel);border-bottom:1px solid var(--line);
+         padding:12px 22px;display:flex;align-items:center;gap:12px;
+         position:sticky;top:0;z-index:20}
+  .logo{width:30px;height:30px;border-radius:8px;background:var(--text);color:#fff;
+        display:flex;align-items:center;justify-content:center;font-weight:800}
+  header b{font-size:14px}
+  header .sub{font-size:10px;color:var(--dim);display:block;letter-spacing:.06em}
+  .whoami{margin-left:auto;font-size:12px;color:var(--dim);display:flex;
+          align-items:center;gap:10px}
+
+  nav.tabs{display:flex;gap:2px;padding:0 22px;background:var(--panel);
+           border-bottom:1px solid var(--line);position:sticky;top:55px;z-index:19}
+  nav.tabs button{border:0;background:none;padding:11px 15px;font-size:13.5px;
+                  color:var(--dim);cursor:pointer;border-bottom:2px solid transparent}
+  nav.tabs button.on{color:var(--hivora-dark);border-bottom-color:var(--hivora);font-weight:600}
+  nav.tabs button:hover{color:var(--text)}
+
+  main{padding:22px;max-width:1240px}
+  .page-head{display:flex;align-items:flex-end;gap:14px;margin-bottom:16px;flex-wrap:wrap}
+  h1{font-size:19px;font-weight:650}
+  .page-head .sub{font-size:12.5px;color:var(--dim)}
+  .actions{margin-left:auto;display:flex;gap:8px}
+
+  .btn{background:var(--hivora);color:#fff;border:0;border-radius:8px;
+       padding:8px 14px;font-size:13px;cursor:pointer;font-weight:550}
+  .btn:hover{background:var(--hivora-dark)}
+  .btn.ghost{background:none;color:var(--hivora-dark);border:1px solid var(--line)}
+  .btn.ghost:hover{background:var(--hivora-light)}
+  .btn.danger{background:var(--red)}
+  .btn.sm{padding:4px 9px;font-size:11.5px;border-radius:6px}
+  .btn:focus-visible,input:focus-visible,select:focus-visible,nav.tabs button:focus-visible{
+    outline:2px solid var(--hivora);outline-offset:2px}
+
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:11px;
+         padding:16px 18px;margin-bottom:14px}
+  .panel h3{font-size:13px;margin-bottom:10px;font-weight:620}
+  .tscroll{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);
+        white-space:nowrap}
+  th{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;
+     font-weight:600}
+  td.wrap{white-space:normal;min-width:280px}
+  tbody tr:hover{background:var(--hivora-light)}
+  .mono{font-family:var(--mono);font-size:12px;font-variant-numeric:tabular-nums}
+
+  .pill{font-size:11px;border-radius:99px;padding:2px 9px;font-weight:600;
+        display:inline-block}
+  .pill.ok{background:#e6f6f0;color:var(--green)}
+  .pill.off{background:#fdeceb;color:var(--red)}
+  .pill.warn{background:#fdf3e0;color:#a5700a}
+  .pill.blue{background:var(--hivora-light);color:var(--hivora-dark)}
+  .row-actions{display:flex;gap:5px;justify-content:flex-end}
+
+  .filters{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+  input,select{border:1px solid var(--line);border-radius:8px;padding:7px 10px;
+               font-size:13px;font-family:inherit;background:var(--panel);color:var(--text)}
+  .empty{color:var(--dim);font-size:13px;padding:14px 2px}
+  .warnbox{background:#fdeceb;border:1px solid #f2c4bf;color:#8f2d1c;
+           border-radius:10px;padding:12px 14px;font-size:13px;margin-bottom:14px}
+
+  /* 登录 / 弹窗 */
+  .overlay{position:fixed;inset:0;background:#111c;z-index:60;display:flex;
+           align-items:center;justify-content:center;padding:20px}
+  .card{background:var(--panel);border-radius:14px;padding:26px;width:100%;max-width:380px}
+  .card h2{font-size:16px;margin-bottom:14px;font-weight:650}
+  .mfield{margin-bottom:11px}
+  .mfield label{font-size:11.5px;color:var(--dim);display:block;margin-bottom:4px}
+  .mfield input,.mfield select{width:100%}
+  .merr{color:var(--red);font-size:12.5px;min-height:18px}
+  .modal-foot{display:flex;gap:8px;justify-content:flex-end;margin-top:6px}
+</style>
+</head>
+<body>
+
+<div id="login" class="overlay">
+  <div class="card">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+      <div class="logo">H</div>
+      <div><b>Hivora Admin</b><span class="sub">内部工具 · V0.1</span></div>
+    </div>
+    <div class="mfield"><label>管理员账号</label><input id="lg-email" autocomplete="username"></div>
+    <div class="mfield"><label>密码</label><input id="lg-pw" type="password" autocomplete="current-password"></div>
+    <div class="merr" id="lg-err"></div>
+    <button class="btn" style="width:100%" onclick="doLogin()">登录</button>
+  </div>
+</div>
+
+<header>
+  <div class="logo">H</div>
+  <div><b>Hivora Admin</b><span class="sub">内部工具 · V0.1</span></div>
+  <div class="whoami"><span id="me"></span>
+    <button class="btn ghost sm" onclick="logout()">退出</button></div>
+</header>
+
+<nav class="tabs">
+  <button data-v="agents" class="on">代理人账号</button>
+  <button data-v="usage">用量与成本</button>
+  <button data-v="audit">审计日志</button>
+  <button data-v="pdpa">客户数据 / PDPA</button>
+</nav>
+
+<main>
+  <div id="caps"></div>
+  <section id="v-agents">
+    <div class="page-head">
+      <div><h1>代理人账号</h1>
+        <div class="sub">账号一律在这里创建后发给付费客户 · 不续费点「停用」，对方手里的登录状态立刻失效</div></div>
+      <div class="actions">
+        <button class="btn ghost" onclick="testEmail()">✉️ 发测试邮件</button>
+        <button class="btn" onclick="openCreate()">＋ 创建账号</button>
+      </div>
+    </div>
+    <div class="panel"><div class="tscroll"><table id="tb-agents"></table></div></div>
+  </section>
+
+  <section id="v-usage" class="hide">
+    <div class="page-head">
+      <div><h1>用量与成本</h1>
+        <div class="sub">每个账号本月烧了多少 token、值多少钱 · 定价和防滥用都看这里</div></div>
+      <div class="actions">
+        <input id="u-month" type="month" onchange="loadUsage()">
+        <button class="btn ghost" onclick="loadUsage()">刷新</button>
+      </div>
+    </div>
+    <div class="panel" id="u-summary"></div>
+    <div class="panel"><div class="tscroll"><table id="tb-usage"></table></div></div>
+  </section>
+
+  <section id="v-audit" class="hide">
+    <div class="page-head">
+      <div><h1>审计日志</h1>
+        <div class="sub">谁、什么时候、做了什么 · PDPA / BNM 问起来的凭据</div></div>
+      <div class="actions">
+        <button class="btn ghost" onclick="exportAudit()">⬇️ 导出 CSV</button>
+        <button class="btn ghost" onclick="loadAudit()">刷新</button>
+      </div>
+    </div>
+    <div class="filters">
+      <select id="f-agent" onchange="loadAudit()"><option value="">全部账号</option></select>
+      <select id="f-action" onchange="loadAudit()"><option value="">全部动作</option></select>
+      <select id="f-limit" onchange="loadAudit()">
+        <option value="100">最近 100 条</option>
+        <option value="300">最近 300 条</option>
+        <option value="500">最近 500 条</option></select>
+    </div>
+    <div class="panel"><div class="tscroll"><table id="tb-audit"></table></div></div>
+  </section>
+
+  <section id="v-pdpa" class="hide">
+    <div class="page-head">
+      <div><h1>客户数据 / PDPA</h1>
+        <div class="sub">收到「被遗忘权」请求时，在这里彻底删除某个客户及其保单、预约、对话</div></div>
+    </div>
+    <div class="warnbox"><b>彻底删除不可恢复。</b>它和代理人自己的「删除」不同 —— 后者进回收站还能恢复，这里是从数据库真删。</div>
+    <div class="filters">
+      <select id="p-agent" onchange="loadPdpa()"><option value="">选择一个代理人…</option></select>
+    </div>
+    <div class="panel"><div class="tscroll"><table id="tb-clients"></table></div></div>
+  </section>
+</main>
+
+<div id="modal" class="overlay hide" onclick="if(event.target===this)closeModal()">
+  <div class="card">
+    <h2 id="m-title"></h2>
+    <div id="m-body"></div>
+    <div class="merr" id="m-err"></div>
+    <div class="modal-foot">
+      <button class="btn ghost" onclick="closeModal()">取消</button>
+      <button class="btn" id="m-save">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $=q=>document.querySelector(q);
+const ESCMAP={"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"};
+const esc=v=>String(v??"").replace(/[&<>"']/g,c=>ESCMAP[c]);
+const API=(document.querySelector('meta[name="hivora-api"]')?.content||"").trim().replace(/\/+$/,"");
+const TOKEN=()=>localStorage.getItem("hivora_admin_token")||"";
+
+async function api(path,opt={}){
+  opt.headers={...(opt.headers||{}),Authorization:"Bearer "+TOKEN()};
+  const r=await fetch(API+"/api/"+path,opt);
+  if(r.status===401||r.status===403){
+    let d=""; try{d=(await r.clone().json()).detail||"";}catch(e){}
+    logout(d||"登录已过期，请重新登录"); throw new Error("auth");
+  }
+  if(!r.ok){
+    let d=""; try{d=(await r.clone().json()).detail||"";}catch(e){}
+    throw new Error(d||("请求失败 "+r.status));
+  }
+  return r.json();
+}
+const post=(p,body)=>api(p,{method:"POST",headers:{"Content-Type":"application/json"},
+                           body:JSON.stringify(body||{})});
+
+/* ── 登录 ── */
+async function doLogin(){
+  $("#lg-err").textContent="";
+  const r=await fetch(API+"/api/auth/login",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({email:$("#lg-email").value.trim(),password:$("#lg-pw").value})});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){$("#lg-err").textContent=j.detail||"登录失败";return;}
+  if(j.role!=="admin"){$("#lg-err").textContent="这是内部管理站，请用管理员账号登录";return;}
+  localStorage.setItem("hivora_admin_token",j.token);
+  localStorage.setItem("hivora_admin_name",j.name||"");
+  $("#login").classList.add("hide");
+  boot();
+}
+function logout(msg){
+  localStorage.removeItem("hivora_admin_token");
+  $("#login").classList.remove("hide");
+  if(msg)$("#lg-err").textContent=msg;
+}
+$("#lg-pw").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
+
+/* ── 标签页 ── */
+document.querySelectorAll("nav.tabs button").forEach(b=>b.onclick=()=>{
+  document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.remove("on"));
+  b.classList.add("on");
+  document.querySelectorAll("main section").forEach(s=>s.classList.add("hide"));
+  $("#v-"+b.dataset.v).classList.remove("hide");
+  ({agents:loadAgents,usage:loadUsage,audit:loadAudit,pdpa:loadPdpa}[b.dataset.v]||(()=>{}))();
+});
+
+/* ── 代理人账号 ── */
+let AGENTS=[];
+const today=()=>new Date().toISOString().slice(0,10);
+function expiryPill(a){
+  if(a.role==="admin")return `<span class="pill blue">不限期</span>`;
+  if(!a.expires)return `<span class="pill warn">未设到期日</span>`;
+  const days=Math.round((new Date(a.expires)-new Date(today()))/86400000);
+  const cls=days<0?"off":days<=14?"warn":"ok";
+  const txt=days<0?`已到期 ${-days} 天`:`${days} 天后`;
+  return `<span class="mono">${esc(a.expires)}</span> <span class="pill ${cls}">${txt}</span>`;
+}
+async function loadAgents(){
+  AGENTS=await api("admin/agents");
+  $("#tb-agents").innerHTML=
+    `<tr><th>账号</th><th>公司</th><th>套餐</th><th>到期</th><th>客户数</th><th>本月用量</th><th>状态</th><th></th></tr>`+
+    AGENTS.map((a,i)=>`<tr>
+      <td class="mono">${esc(a.email)}${a.role==="admin"?' <span class="pill blue">admin</span>':""}</td>
+      <td>${esc(a.brand||a.name)}</td>
+      <td>${esc(a.plan||"")}</td>
+      <td>${expiryPill(a)}</td>
+      <td class="mono">${esc(a.clients)}</td>
+      <td class="mono">${usageCell(a)}</td>
+      <td><span class="pill ${a.active?"ok":"off"}">${a.active?"启用":"停用"}</span></td>
+      <td><div class="row-actions">
+        <button class="btn ghost sm" onclick="openPassword(${i})">重置密码</button>
+        ${a.role==="admin"?"":`
+        <button class="btn ghost sm" onclick="openPlan(${i})">套餐/到期</button>
+        <button class="btn ghost sm" onclick="openQuota(${i})">额度</button>
+        <button class="btn ghost sm" onclick="toggleAgent(${i})">${a.active?"停用":"启用"}</button>`}
+      </div></td></tr>`).join("");
+  fillAgentSelects();
+}
+async function toggleAgent(i){
+  const a=AGENTS[i];
+  if(!a.active){                       // 启用是无害操作，一次确认就够
+    if(!confirm(`启用「${a.email}」？`))return;
+    await post(`admin/agents/${a.id}/toggle`,{active:true});
+    loadAgents(); return;
+  }
+  /* 停用会让对方立刻用不了，是影响生意的操作 —— 两道确认，
+     第二道要求打一遍邮箱。服务端也会再校验一次。 */
+  if(!confirm(`停用「${a.email}」？\n\n对方手里的登录状态会立刻失效，`+
+              `Telegram 上的客户也收不到回复了。`))return;
+  const typed=prompt(`确认停用。请把邮箱原样打一遍：\n${a.email}`,"");
+  if(typed===null)return;
+  try{
+    await post(`admin/agents/${a.id}/toggle`,{active:false,confirm:typed});
+    loadAgents();
+  }catch(e){alert("❌ "+(e.message||"停用失败"));}
+}
+
+let SETTINGS={};
+async function loadSettings(){
+  try{SETTINGS=await api("admin/settings");}catch(e){SETTINGS={};}
+  const bad=[];
+  if(SETTINGS.email_configured===false)
+    bad.push("没配 SMTP —— 建账号后不会自动发登录信，需要你手动把密码发给代理人");
+  if(SETTINGS.telegram_ready===false)
+    bad.push("没配 PUBLIC_BASE_URL —— 代理人连不了自己的 Telegram bot，客户渠道用不了");
+  $("#caps").innerHTML=bad.length
+    ? `<div class="warnbox" style="background:#fdf3e0;border-color:#e8cf9a;color:#7a5405">
+         ${bad.map(x=>`<div>⚠️ ${esc(x)}</div>`).join("")}
+       </div>` : "";
+}
+async function testEmail(){
+  if(SETTINGS.email_configured===false){
+    alert("还没配 SMTP。\n\nRender Environment 里加：\n"+
+          "SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASSWORD / SMTP_FROM");
+    return;
+  }
+  const to=prompt("发到哪个邮箱？（用来验证 SMTP 配好了没）",
+                  localStorage.getItem("hivora_admin_name")||"");
+  if(!to)return;
+  try{
+    await post("admin/email/test",{to});
+    alert(`✅ 已发出，去 ${to} 收信。\n没收到就看垃圾箱。`);
+  }catch(e){
+    alert("❌ "+(e.message||"发送失败"));
+  }
+}
+function fmt(n){return (n||0).toLocaleString();}
+function usageCell(a){
+  const used=a.tokens||0;
+  if(a.role==="admin")return `<span class="sub">—</span>`;
+  if(a.token_quota===-1)return `${fmt(used)} <span class="pill blue">不限</span>`;
+  return fmt(used);
+}
+async function loadUsage(){
+  const m=$("#u-month").value||"";
+  const d=await api("admin/usage"+(m?"?month="+encodeURIComponent(m):""));
+  if(!$("#u-month").value)$("#u-month").value=d.month;
+  $("#u-summary").innerHTML=
+    `<div style="display:flex;gap:26px;flex-wrap:wrap">
+       <div><div class="sub">月份</div><b class="mono" style="font-size:17px">${esc(d.month)}</b></div>
+       <div><div class="sub">总 token</div><b class="mono" style="font-size:17px">${fmt(d.total_tokens)}</b></div>
+       <div><div class="sub">估算成本</div><b class="mono" style="font-size:17px">US$ ${esc(d.total_cost_usd)}</b></div>
+       <div><div class="sub">有用量的账号</div><b class="mono" style="font-size:17px">${d.agents.length}</b></div>
+     </div>
+     <div class="sub" style="margin-top:8px">成本按环境变量里的单价估算（PRICE_PER_MTOK_IN / OUT），换模型记得改。</div>`;
+  $("#tb-usage").innerHTML=d.agents.length
+    ? `<tr><th>账号</th><th>调用次数</th><th>输入</th><th>输出</th><th>合计</th><th>额度</th><th>成本 (USD)</th></tr>`
+      +d.agents.map(a=>{
+        const pct=a.limit?Math.round(a.tokens/a.limit*100):null;
+        const cls=pct===null?"blue":pct>=100?"off":pct>=80?"warn":"ok";
+        return `<tr>
+          <td class="mono">${esc(a.agent)}</td>
+          <td class="mono">${fmt(a.calls)}</td>
+          <td class="mono">${fmt(a.prompt_tokens)}</td>
+          <td class="mono">${fmt(a.completion_tokens)}</td>
+          <td class="mono"><b>${fmt(a.tokens)}</b></td>
+          <td>${a.limit===null?`<span class="pill blue">不限</span>`
+                :`<span class="pill ${cls}">${pct}% / ${fmt(a.limit)}</span>`}</td>
+          <td class="mono">${esc(a.cost_usd)}</td></tr>`;}).join("")
+    : `<tr><td class="empty">这个月还没有任何 AI 调用</td></tr>`;
+}
+
+/* ── 弹窗 ── */
+let onSave=null;
+function openModal(title,fields,save){
+  $("#m-title").textContent=title; $("#m-err").textContent="";
+  $("#m-body").innerHTML=fields.map(f=>`<div class="mfield">
+    <label for="f-${esc(f.id)}">${esc(f.label)}</label>
+    ${f.type==="select"
+      ? `<select id="f-${esc(f.id)}">${f.options.map(o=>
+          `<option value="${esc(o)}"${o===f.value?" selected":""}>${esc(o)}</option>`).join("")}</select>`
+      : `<input id="f-${esc(f.id)}" type="${esc(f.type||"text")}"
+           value="${esc(f.value||"")}" placeholder="${esc(f.ph||"")}">`}
+    ${f.hint?`<div class="sub" style="font-size:11px;color:var(--dim);margin-top:3px">${esc(f.hint)}</div>`:""}
+  </div>`).join("");
+  onSave=async()=>{
+    const v={}; fields.forEach(f=>v[f.id]=$("#f-"+f.id).value.trim());
+    await save(v);
+  };
+  $("#modal").classList.remove("hide");
+  const first=fields[0]; if(first)$("#f-"+first.id).focus();
+}
+function closeModal(){$("#modal").classList.add("hide");onSave=null;}
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&onSave)closeModal();});
+$("#m-save").onclick=async()=>{
+  if(!onSave)return;
+  $("#m-save").disabled=true; $("#m-err").textContent="";
+  try{await onSave();closeModal();}
+  catch(err){$("#m-err").textContent=err.message||"保存失败";}
+  finally{$("#m-save").disabled=false;}
+};
+
+function openCreate(){
+  openModal("创建账号",[
+    {id:"email",label:"邮箱 *",ph:"contact@companyA.com",
+     hint:"开通链接会发到这里，对方点进去自己设密码"},
+    {id:"brand",label:"公司名",ph:"公司A",hint:"白牌：他们界面上和 AI 自称都用这个名字"},
+    {id:"name",label:"联系人"},
+    {id:"plan",label:"套餐",type:"select",options:["paid","trial"],value:"paid"},
+    {id:"expires",label:"到期日",type:"date",hint:"留空 = 不限期。到期后对方自动登不进来。"},
+  ],async v=>{
+    if(!v.email)throw new Error("邮箱必填");
+    const r=await post("admin/agents/create",{email:v.email,name:v.name,
+                                             plan:v.plan,brand:v.brand});
+    if(v.expires){
+      const list=await api("admin/agents");
+      const made=list.find(x=>x.email===v.email.toLowerCase());
+      if(made)await post(`admin/agents/${made.id}/plan`,{plan:v.plan,expires:v.expires});
+    }
+    loadAgents();
+    handover(r.email_sent,v.email,r.setup_link);
+  });
+}
+function openQuota(i){
+  const a=AGENTS[i];
+  openModal(`月度 AI 额度 · ${a.email}`,[
+    {id:"token_quota",label:"月度 token 上限",value:String(a.token_quota||0),
+     hint:"0 = 用全局默认；-1 = 不限；其他数字 = 该账号的上限。超了对方会看到「本月用量已达上限」。"},
+  ],async v=>{
+    const q=parseInt(v.token_quota,10);
+    if(Number.isNaN(q))throw new Error("请填一个整数");
+    await post(`admin/agents/${a.id}/quota`,{token_quota:q});
+    loadAgents();
+  });
+}
+/* 账号建好之后最要紧的一件事：对方怎么进得来。
+   发出去了就说一声；没发出去就把链接摆出来让管理员手动发。
+   注意给的是一次性链接，不是密码 —— 密码由对方自己设。 */
+function handover(sent,email,link){
+  if(sent){
+    alert(`✅ 账号已创建，开通信已发到 ${email}\n\n对方点信里的链接自己设密码。`);
+    return;
+  }
+  prompt(`⚠️ 账号已创建，但开通信没发出去。\n`+
+         `把下面这个链接发给对方（48 小时内有效，只能用一次）：`, link||"");
+}
+function openPassword(i){
+  const a=AGENTS[i];
+  openModal(`重置密码 · ${a.email}`,[
+    {id:"note",label:"说明",value:"发一个一次性链接，对方自己设新密码",
+     hint:"48 小时内有效。旧链接会立刻作废。"},
+  ],async v=>{
+    const r=await post(`admin/agents/${a.id}/password`,{});
+    handover(r.email_sent,a.email,r.setup_link);
+  });
+}
+function openPlan(i){
+  const a=AGENTS[i];
+  openModal(`套餐与到期 · ${a.email}`,[
+    {id:"plan",label:"套餐",type:"select",options:["paid","trial"],value:a.plan||"paid"},
+    {id:"expires",label:"到期日",type:"date",value:a.expires||"",
+     hint:"留空 = 不限期。到期当天之后对方登录和所有请求都会被挡下。"},
+  ],async v=>{
+    await post(`admin/agents/${a.id}/plan`,{plan:v.plan,expires:v.expires});
+    loadAgents();
+  });
+}
+
+/* ── 审计日志 ── */
+const ACTIONS=["login","add_client","edit_client","add_policy","edit_policy","add_appt",
+               "add_product","teach","upload_doc","suggest","send","opportunity",
+               "ai_action","chat","delete_client","delete_policy","restore_client",
+               "admin_create_agent","toggle_agent","reset_password","set_plan","purge_client"];
+function fillAgentSelects(){
+  const opts=AGENTS.map(a=>`<option value="${esc(a.agent_key)}">${esc(a.email)}</option>`).join("");
+  const fa=$("#f-agent"),pa=$("#p-agent");
+  if(fa.options.length<=1)fa.insertAdjacentHTML("beforeend",opts);
+  if(pa.options.length<=1)pa.insertAdjacentHTML("beforeend",opts);
+  const fac=$("#f-action");
+  if(fac.options.length<=1)
+    fac.insertAdjacentHTML("beforeend",ACTIONS.map(a=>`<option>${esc(a)}</option>`).join(""));
+}
+async function exportAudit(){
+  /* 带上当前的筛选条件，导出跟屏幕上看到的一致。
+     token 走 Authorization 头，**不能塞进 URL** —— 那会落进服务器日志、
+     浏览器历史和 Referer。所以先 fetch 回来再本地生成下载。 */
+  const q=new URLSearchParams({agent_key:$("#f-agent").value,
+                               action:$("#f-action").value,limit:"5000"});
+  let blob;
+  try{
+    const r=await fetch(API+"/api/admin/audit/export?"+q,
+                        {headers:{Authorization:"Bearer "+TOKEN()}});
+    if(!r.ok)throw new Error("导出失败 "+r.status);
+    blob=await r.blob();
+  }catch(e){alert("❌ "+(e.message||"导出失败"));return;}
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;
+  a.download="hivora-audit-"+new Date().toISOString().slice(0,10)+".csv";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+async function loadAudit(){
+  if(!AGENTS.length)AGENTS=await api("admin/agents");
+  fillAgentSelects();
+  const q=new URLSearchParams({agent_key:$("#f-agent").value,action:$("#f-action").value,
+                               limit:$("#f-limit").value});
+  const rows=await api("admin/audit?"+q);
+  $("#tb-audit").innerHTML=rows.length
+    ? `<tr><th>时间</th><th>账号</th><th>动作</th><th>详情</th></tr>`+rows.map(r=>`<tr>
+        <td class="mono">${esc(r.ts)}</td>
+        <td class="mono">${esc(r.agent)}</td>
+        <td><span class="pill blue">${esc(r.action)}</span></td>
+        <td class="wrap">${esc(r.detail)}</td></tr>`).join("")
+    : `<tr><td class="empty">没有匹配的记录</td></tr>`;
+}
+
+/* ── PDPA ── */
+async function loadPdpa(){
+  if(!AGENTS.length)AGENTS=await api("admin/agents");
+  fillAgentSelects();
+  const key=$("#p-agent").value;
+  if(!key){$("#tb-clients").innerHTML=`<tr><td class="empty">先选一个代理人</td></tr>`;return;}
+  const cs=await api("admin/clients?agent_key="+encodeURIComponent(key));
+  $("#tb-clients").innerHTML=cs.length
+    ? `<tr><th>ID</th><th>姓名</th><th>电话</th><th>保单</th><th>状态</th><th></th></tr>`+cs.map(c=>`<tr>
+        <td class="mono">${esc(c.id)}</td>
+        <td>${esc(c.name)}</td>
+        <td class="mono">${esc(c.phone)}</td>
+        <td class="mono">${esc(c.policies)}</td>
+        <td>${c.deleted?`<span class="pill off">在回收站</span>`:`<span class="pill ok">正常</span>`}</td>
+        <td><div class="row-actions">
+          <button class="btn danger sm" onclick="purge(${Number(c.id)},'${esc(c.name)}')">彻底删除</button>
+        </div></td></tr>`).join("")
+    : `<tr><td class="empty">这个代理人还没有客户</td></tr>`;
+}
+async function purge(id,name){
+  if(!confirm(`彻底删除客户「${name}」？\n\n连同他的保单、预约、对话记录一起从数据库真删，`+
+              `不可恢复。这个操作会记进审计日志。`))return;
+  const typed=prompt(`不可恢复。请把客户姓名原样打一遍确认：\n${name}`,"");
+  if(typed===null)return;
+  let r;
+  try{ r=await post(`admin/clients/${id}/purge`,{confirm:typed}); }
+  catch(e){ alert("❌ "+(e.message||"删除失败")); return; }
+  alert(`已彻底删除。\n保单 ${r.purged.policies} · 预约 ${r.purged.appointments} · 对话 ${r.purged.threads} · 消息 ${r.purged.messages}`);
+  loadPdpa();
+}
+
+/* ── 启动 ── */
+function boot(){
+  $("#me").textContent=localStorage.getItem("hivora_admin_name")||"";
+  loadSettings();
+  loadAgents().catch(()=>{});
+}
+if(TOKEN())boot(); else $("#login").classList.remove("hide");
+</script>
+</body>
+</html>

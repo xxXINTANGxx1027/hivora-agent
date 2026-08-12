@@ -176,6 +176,40 @@ def test_admin_app_escapes_and_is_noindex():
     assert not [x for x in raw if x in html]
 
 
+def _strip_meta(html):
+    """去掉两个由构建期写入的 meta，剩下的内容两份必须一模一样。"""
+    import re
+    for name in ("hivora-api", "hivora-build"):
+        html = re.sub(f'(<meta name="{name}" content=")[^"]*(">)', r"\1\2", html)
+    return html
+
+
+def test_console_is_served_by_the_backend_itself():
+    """管理站挂在后端同源路径上：不用单独的托管项目，也不吃 CORS。"""
+    import main
+    from fastapi.testclient import TestClient
+
+    with TestClient(main.app) as c:
+        r = c.get("/console")
+        assert r.status_code == 200
+        assert "noindex" in r.headers.get("x-robots-tag", "")
+        assert "const esc=" in r.text          # 确实是管理站那份，不是客户端
+        assert "api/admin" in r.text
+
+
+def test_console_copy_stays_in_sync_with_admin_source():
+    """admin/index.html 是唯一来源；改了不跑 sync-frontend.sh 就该红。"""
+    assert _strip_meta(_read("server", "static", "console.html")) == \
+           _strip_meta(_read("admin", "index.html"))
+
+
+def test_console_calls_its_own_origin():
+    """后端自带的这份后端地址必须留空 —— 否则同源的意义就没了。"""
+    html = _read("server", "static", "console.html")
+    assert '<meta name="hivora-api" content="">' in html
+    assert "onrender.com" not in html
+
+
 def test_both_apps_read_backend_from_meta():
     for path in (("server", "static", "index.html"), ("admin", "index.html")):
         html = _read(*path)

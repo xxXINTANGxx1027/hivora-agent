@@ -203,6 +203,27 @@ def test_admin_site_loads_and_lists_agents(admin_site, page):
     _assert_no_js_errors(page)
 
 
+def test_console_on_the_backend_works_same_origin(live_server, page):
+    """线上真正的入口是后端自己的 /console —— 同源，不经过 CORS。
+    上面那几条用的是跨域托管的夹具，两条路都得能走。"""
+    _login(page, live_server + "/console", "admin@test.local", "Test-Admin-2026")
+    assert page.evaluate(
+        """() => document.querySelector('meta[name="hivora-api"]').content""") == "", \
+        "后端自带的这份不该写死后端地址"
+    page.wait_for_selector("#tb-agents tr", timeout=15000)
+    assert "admin@test.local" in page.locator("#tb-agents").inner_text()
+    _assert_nothing_covers_the_page(page)
+    _assert_no_js_errors(page)
+
+
+def test_client_app_and_console_do_not_share_a_token(live_server, page, agent_factory):
+    """两个站现在同源，localStorage 是共用的 —— 键名撞了就会串号。"""
+    _, email = agent_factory()
+    _login(page, live_server, email, "Agent-Pass-2026")
+    keys = page.evaluate("() => Object.keys(localStorage)")
+    assert "hivora_admin_token" not in keys, f"代理人登录写了管理员的键：{keys}"
+
+
 def test_admin_tabs_all_clickable(admin_site, page):
     _login(page, admin_site, "admin@test.local", "Test-Admin-2026")
     for view in ("agents", "audit", "pdpa"):
