@@ -35,9 +35,13 @@ Python + FastAPI + LangGraph + SQLAlchemy 后端，单文件 HTML SPA 前端。
      `tests/test_telegram.py` 里那一组合规测试
 
    面向代理人本人（绑过码的 Telegram、网页 dashboard）不受此限，照常回答。
-3. **密码不走邮件**：开通和重置都发一次性链接（`auth.new_setup_token`，48 小时、
-   只能用一次、重发即作废），对方点进 `?setup=<token>` 自己设。
-   `email_out` 里绝不能再出现明文密码。
+3. **密码不走邮件，也不归管理员**：
+   - 开通和重置都发一次性链接（`auth.new_setup_token`，48 小时、只能用一次、
+     重发即作废），对方点进 `?setup=<token>` **自己设**
+   - 本人可随时改（`POST /api/password`，**必须验旧密码** —— 否则谁偷到 token
+     就能把账号锁走）；改完之前发出的链接一律作废
+   - 管理员**看不到也设不了**别人的真密码，只能重发链接
+   - `email_out` 里绝不能出现明文密码
 4. **密钥**：绝不把 API key/连接串写进代码或提交 git。用 .env（本地）/ Render Environment（云端）。
    `server/.env` 在 .gitignore 里，保持这样。
 5. **审计**：新增的写操作和 AI 动作要调用 `db.audit(session, agent_id, action, detail)`。

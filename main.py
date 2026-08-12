@@ -243,6 +243,21 @@ class BrandReq(BaseModel):
     auto_reply: bool | None = None
 
 
+class ChangePwReq(BaseModel):
+    old_password: str = ""
+    new_password: str
+
+
+@app.post("/api/password")
+def change_password(req: ChangePwReq, aid: str = AID):
+    """本人改密码。密码是他自己的，不该只能找管理员重发链接。"""
+    s = SessionLocal()
+    try:
+        return auth.change_password(s, aid, req.old_password, req.new_password)
+    finally:
+        s.close()
+
+
 @app.get("/api/brand")
 def get_brand(aid: str = AID):
     """白牌：界面标题、AI 自称、给客户的消息都用这个名字。"""

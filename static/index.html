@@ -348,7 +348,7 @@
     <button data-v="renewals" class="m-more"><svg class="nic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg><span class="lbl">续保管道</span><span class="badge" id="b-renew"></span></button>
   </nav>
   <button id="more-btn" onclick="toggleMore()"><svg class="nic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg><span class="lbl-s" id="more-lbl">更多</span><span class="badge" id="b-more"></span></button>
-  <div class="foot" style="margin-top:auto"><span id="foot-model">…</span> · LangGraph<br><span id="foot-name"></span> · PDPA 隔离 · <a href="javascript:logout()" style="color:var(--hivora)">退出</a></div>
+  <div class="foot" style="margin-top:auto"><span id="foot-model">…</span> · LangGraph<br><span id="foot-name"></span> · PDPA 隔离 · <a href="#" id="foot-chpw" onclick="openModal('changePw');return false" style="color:var(--dim)">改密码</a> · <a href="javascript:logout()" style="color:var(--hivora)">退出</a></div>
 </aside>
 
 <div id="more-sheet" class="hide">
@@ -649,6 +649,8 @@ const I18N={
   pick_thread:"← 选择一个对话",reply_ph:"自己写，或点上面的建议回复填入…",
   tg_thread:"✈️ Telegram",tg_sent:"✅ 已发到客户的 Telegram",
   lead:"新线索",to_client:"＋ 加为客户",m_link:"把线索转成客户",
+  m_chpw:"修改密码",f_oldpw:"当前密码 *",f_newpw:"新密码 *（至少 8 位）",f_confirm:"再输一次 *",
+  pw_short:"新密码至少 8 位",pw_mismatch:"两次输入不一致",pw_done:"密码已更新",chpw:"改密码",
   tg_getcode:"生成绑定码",tg_open:"打开 Telegram",loading:"载入中",ai_auto:"🤖 自动回复",
   tg_waiting:"等待绑定… 绑好这里会自己变。绑定码 10 分钟内有效。",
   tg_expired:"绑定码可能已过期，重新生成一个。",
@@ -698,6 +700,9 @@ const I18N={
   pick_thread:"← Pick a conversation",reply_ph:"Type your reply, or click a suggestion above…",
   tg_thread:"✈️ Telegram",tg_sent:"✅ Sent to the client on Telegram",
   lead:"New lead",to_client:"＋ Add as client",m_link:"Turn lead into a client",
+  m_chpw:"Change password",f_oldpw:"Current password *",f_newpw:"New password * (8+)",
+  f_confirm:"Confirm *",pw_short:"New password must be 8+ characters",
+  pw_mismatch:"The two entries differ",pw_done:"Password updated",chpw:"Change password",
   tg_getcode:"Get a link code",tg_open:"Open Telegram",loading:"Loading",ai_auto:"🤖 Auto-replied",
   tg_waiting:"Waiting for the link… this updates by itself. The code expires in 10 minutes.",
   tg_expired:"The code has probably expired — generate a new one.",
@@ -813,6 +818,7 @@ function applyLang(){
   setText("#v-train .col:first-child .col-foot .btn","teach_btn");
   setText("#v-train .col:last-child .col-foot .btn","send");
   setText("#trash-btn","trash");
+  setText("#foot-chpw","chpw");
   setText("#tg-btn","tg_btn");
   setText("#btn-add-policy","add_policy");
   setText("#btn-add-client","add_client");
@@ -1449,6 +1455,19 @@ const MODALS={
     {id:"renewal",label:"f_renewal",type:"date"}],
     required:["product"],
     save:async v=>{await post("policies/update",v);loadClients();loadDash();}},
+  changePw:{title:"m_chpw",fields:[
+    {id:"old_password",label:"f_oldpw",type:"password"},
+    {id:"new_password",label:"f_newpw",type:"password"},
+    {id:"confirm",label:"f_confirm",type:"password"}],
+    required:["old_password","new_password"],
+    save:async v=>{
+      if(v.new_password.length<8)throw t("pw_short");
+      if(v.new_password!==v.confirm)throw t("pw_mismatch");
+      const r=await post("password",{old_password:v.old_password,
+                                     new_password:v.new_password});
+      if(r.token)localStorage.setItem("hivora_token",r.token);   // 换了密码 token 也换
+      alert(t("pw_done"));
+    }},
   client:{title:"m_client",fields:[
     {id:"name",label:"f_name",ph:"e.g. Ahmad Faiz"},
     {id:"phone",label:"f_phone",ph:"012-345 6789"},
@@ -1493,7 +1512,8 @@ function openModal(kind,preset={}){
            border-radius:8px;padding:8px 10px;font-size:13px;font-family:inherit">
           ${(f.options||[]).map(o=>`<option value="${esc(o.v)}">${esc(o.label)}</option>`).join("")}
          </select>`
-      : `<input id="m-${f.id}" type="${f.type||"text"}" placeholder="${f.ph||""}">`}
+      : `<input id="m-${f.id}" type="${f.type||"text"}" placeholder="${f.ph||""}"
+           ${f.type==="password"?'autocomplete="off"':""}>`}
     </div>`).join("");
   m.fields.forEach(f=>{if(preset[f.id]!==undefined)$("#m-"+f.id).value=preset[f.id];});
   $("#modal").classList.remove("hide");

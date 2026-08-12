@@ -304,3 +304,56 @@ def test_issuing_a_new_link_invalidates_the_old_one(app_client, admin_token, no_
     assert app_client.post("/api/auth/setup",
                            json={"token": new, "password": "New-Link-2026"}
                            ).status_code == 200
+
+
+# ── 本人改密码 ────────────────────────────────────────────────
+def test_owner_can_change_their_own_password(app_client, agent_factory):
+    tok, email = agent_factory()
+    r = app_client.post("/api/password", headers=H(tok),
+                        json={"old_password": "Agent-Pass-2026",
+                              "new_password": "Chosen-By-Me-2026"})
+    assert r.status_code == 200 and r.json()["token"]
+    assert app_client.post("/api/auth/login",
+                           json={"email": email, "password": "Chosen-By-Me-2026"}
+                           ).status_code == 200
+    assert app_client.post("/api/auth/login",
+                           json={"email": email, "password": "Agent-Pass-2026"}
+                           ).status_code == 401
+
+
+def test_changing_password_requires_the_current_one(app_client, agent_factory):
+    """光有 token 不够 —— 否则 token 被偷就等于账号被永久夺走。"""
+    tok, email = agent_factory()
+    r = app_client.post("/api/password", headers=H(tok),
+                        json={"old_password": "猜的", "new_password": "Hijacked-2026"})
+    assert r.status_code == 400
+    assert app_client.post("/api/auth/login",
+                           json={"email": email, "password": "Agent-Pass-2026"}
+                           ).status_code == 200
+
+
+def test_changing_password_invalidates_pending_setup_links(app_client, admin_token,
+                                                           agent_factory, no_smtp):
+    """自己改完密码，管理员之前发的链接就不该还能用。"""
+    import db
+    tok, email = agent_factory()
+    aid = next(a["id"] for a in app_client.get("/api/admin/agents",
+                                               headers=H(admin_token)).json()
+               if a["email"] == email)
+    link = app_client.post(f"/api/admin/agents/{aid}/password", headers=H(admin_token),
+                           json={}).json()["setup_link"]
+    token = link.split("?setup=")[1]
+
+    app_client.post("/api/password", headers=H(tok),
+                    json={"old_password": "Agent-Pass-2026",
+                          "new_password": "Mine-Now-2026"})
+    assert app_client.post("/api/auth/setup",
+                           json={"token": token, "password": "Stale-Link-2026"}
+                           ).status_code == 400
+
+
+def test_change_password_rejects_a_short_one(app_client, agent_factory):
+    tok, _ = agent_factory()
+    assert app_client.post("/api/password", headers=H(tok),
+                           json={"old_password": "Agent-Pass-2026",
+                                 "new_password": "1234567"}).status_code == 400

@@ -184,6 +184,24 @@ def consume_setup(s, token: str, password: str) -> dict:
     return dict(token=make_token(a.agent_key), name=a.name, role=a.role or "agent")
 
 
+def change_password(s, agent_id: str, old_pw: str, new_pw: str) -> dict:
+    """本人改密码。必须验旧密码 —— 否则谁拿到 token 就能把账号锁走。"""
+    if len(new_pw) < 8:
+        raise HTTPException(400, "新密码至少 8 位")
+    a = s.query(db.Agent).filter_by(agent_key=agent_id).first()
+    if not a:
+        raise HTTPException(404)
+    if not hmac.compare_digest(a.pw_hash, hash_pw(old_pw or "", a.salt)):
+        raise HTTPException(400, "当前密码不对")
+    salt = secrets.token_hex(16)
+    a.pw_hash, a.salt = hash_pw(new_pw, salt), salt
+    # 改完密码，之前发出去的设密码链接一律作废
+    s.query(db.SetupToken).filter_by(agent_id=agent_id, used="").delete()
+    db.audit(s, agent_id, "change_password", a.email)
+    s.commit()
+    return dict(token=make_token(agent_id))
+
+
 # ── 初始账号 ────────────────────────────────────────────────
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "").strip().lower()
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
