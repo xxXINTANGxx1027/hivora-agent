@@ -278,11 +278,21 @@ def test_backup_script_exists():
     assert (SERVER_DIR / ".github" / "workflows" / "backup.yml").exists()
 
 
-@needs_workspace
 def test_runbook_covers_the_incidents_we_have_actually_had():
-    runbook = (WORKSPACE / "RUNBOOK.md").read_text(encoding="utf-8")
-    for topic in ("readyz", "回滚", "恢复", "CORS", "PDPA", "SMTP"):
+    """文档跟代码放同一个 repo，所以这条在 CI 里也能跑。"""
+    runbook = (SERVER_DIR / "RUNBOOK.md").read_text(encoding="utf-8")
+    for topic in ("readyz", "回滚", "恢复", "CORS", "PDPA", "SMTP", "Brevo"):
         assert topic in runbook, f"RUNBOOK 没写 {topic}"
+
+
+def test_docs_live_in_the_repo_not_only_on_one_laptop():
+    """根目录不是 git repo —— 文档只放那儿等于没进版本控制。
+
+    以前根目录和 server/ 各有一份，改了根目录那份，repo 里的悄悄变成旧版。
+    现在 server/ 是唯一来源，根目录是软链。
+    """
+    for name in ("RUNBOOK.md", "TODO.md", "QA.md", "AGENTS.md"):
+        assert (SERVER_DIR / name).is_file(), f"{name} 不在 repo 里"
 
 
 # ── 部署工具链 ────────────────────────────────────────────────

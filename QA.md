@@ -18,8 +18,8 @@ cd server && .venv/bin/python -m pytest tests -q     # 先确认自动化全绿�
 |---|---|---|---|
 | 0.1 | `curl .../healthz` | `ok:true`，`build` 跟本地 `git log -1` 对得上 | |
 | 0.2 | `curl .../readyz` | `db:ok`，`storage:postgres`（**不能是 sqlite**） | |
-| 0.3 | 管理站能打开并登录 | 进得去，非 admin 账号登录被拒 | |
-| 0.4 | 管理站顶部有没有黄条警告 | 没有。有的话说明 SMTP 或 `PUBLIC_BASE_URL` 没配 | |
+| 0.3 | 管理站 `.../console` 能打开并登录 | 进得去，非 admin 账号登录被拒 | |
+| 0.4 | 管理站顶部有没有黄条警告 | 没有。有的话说明发信通道或 `PUBLIC_BASE_URL` 没配 | |
 | 0.5 | 点「✉️ 发测试邮件」 | 收得到（记得看垃圾箱） | |
 
 > 0.2 如果是 `sqlite`，说明 `DATABASE_URL` 没生效 —— **停下来先修**，
@@ -214,7 +214,7 @@ cd server && .venv/bin/python -m pytest tests -q     # 先确认自动化全绿�
 | J.1 | 把 `OPENROUTER_API_KEY` 改错，重新部署 | 界面提示「AI 服务暂时不可用」，**客户数据照常能看能改** | |
 | J.2 | 同上，客户在 Telegram 提问 | 客户收到「转给同事」，不是报错 | |
 | J.3 | 改回来 | 恢复正常 | |
-| J.4 | 把 `SMTP_HOST` 清空，建一个账号 | **账号照样建成功**，管理站把链接摆出来让你手动发 | |
+| J.4 | 把 `RESEND_API_KEY` 和 `SMTP_HOST` 都清空，建一个账号 | **账号照样建成功**，管理站把链接摆出来让你手动发 | |
 
 > J.1 的重点是：AI 挂了，CRM 部分还能用。**这两块不该同生共死。**
 

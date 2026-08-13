@@ -11,7 +11,9 @@ Python + FastAPI + LangGraph + SQLAlchemy 后端，单文件 HTML SPA 前端。
 
 ## 主开发目录
 `server/`（= GitHub repo hivora-agent，push main 即自动部署 Render）。
-`admin/` 是独立的内部管理站（= repo hivora-admin，独立 Vercel 项目）。
+`admin/` 是内部管理站的**唯一来源**（= repo hivora-admin）。线上那份由
+`./sync-frontend.sh` 生成到 `server/static/console.html`，跟后端同源挂在 `/console`
+—— 改完 `admin/index.html` 必须跑一次同步脚本，否则 pre-push 钩子会拦。
 `pages-demo/` / `pages-stage/` 是冻结的静态 demo，**不要在里面开发**。
 
 ## 前后台分离（V0.1 起）

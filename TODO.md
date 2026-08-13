@@ -25,26 +25,57 @@ V0.1 全部推上生产并验证过：客户端已无管理代码、后端 build
 
 ---
 
-## 📧 邮件怎么配（5 分钟）
+## 📧 邮件 —— ✅ 已跑通（2026-08-13）
 
-最快的路是 Gmail 应用专用密码 —— 免费、当天能用，前几十个账号足够。
-等买了 `hivora.my` 域名再换 Resend 之类的，发件人才能是 `no-reply@hivora.my`。
+线上走 Brevo，实测发到 `xintang092@icloud.com` 并进了收件箱。
+配置在 Render：`BREVO_API_KEY` + `MAIL_FROM=Hivora <xintang092@gmail.com>`。
 
-1. Google 账号 → 安全性 → **开启两步验证**（不开就没有应用专用密码这个选项）
-2. 搜「应用专用密码」→ 生成 → 得到 16 位，**去掉空格**
-3. Render Environment 加：
+踩过的三个坑（都记在 [RUNBOOK.md](RUNBOOK.md) §5b）：
+1. Render 免费档封了 SMTP 出站端口 → 必须走 HTTP API
+2. Resend 不验证域名就只能发给账号持有者本人 → 换 Brevo（单邮箱验证）
+3. Brevo 默认开 IP 白名单 → 要把 Render 的两个出站网段加进去
+
+**遗留**：发件人被 Brevo 改写成 `xintang092@11884934.brevosend.com`
+（gmail 域名没法由 Brevo 签 DKIM）。买域名验证后消失 —— 发付费账号前要处理，
+客户看到这个发件地址会当成钓鱼。
+
+<details><summary>配置步骤（换环境时看这里）</summary>
+
+
+> ⛔ **Gmail SMTP 这条路在 Render 免费档上走不通。** Render 从 2025-09 起
+> 封了免费实例的出站 25 / 465 / 587，连接直接超时 —— 跟账号密码对不对无关，
+> 日志里的表现是 traceback 停在 `smtplib.py … _get_socket`。
+> 要用 SMTP 就得先升级到付费实例（$7/月）。
+
+走 HTTP API（443 端口，不受封锁）。**没有自己域名时用 Brevo** —— 它允许
+只验证单个发件邮箱，验完就能发给任何收件人：
+
+1. 去 [brevo.com](https://www.brevo.com) 注册
+2. **Senders & Domains → Senders → Add a sender**，填你的邮箱 →
+   它发一个 **6 位验证码**到那个邮箱 → 填回去验证
+3. **SMTP & API → API Keys → Generate**，得到 `xkeysib-...`
+4. Render Environment 加：
    ```
-   SMTP_HOST     = smtp.gmail.com
-   SMTP_PORT     = 587
-   SMTP_USER     = xintang092@gmail.com
-   SMTP_PASSWORD = <16 位应用专用密码>
-   SMTP_FROM     = Hivora <xintang092@gmail.com>
+   BREVO_API_KEY = xkeysib-...
+   MAIL_FROM     = Hivora <上一步验证过的邮箱>
    APP_LOGIN_URL = https://hivora-frontend.vercel.app
    ```
-4. 管理站点右上角 **✉️ 发测试邮件**，收到就成了
+5. 管理站右上角 **✉️ 发测试邮件**，收到就成了（弹窗会显示走的哪条通道）
 
-> ⚠️ `SMTP_FROM` 的邮箱必须和 `SMTP_USER` 一致 —— Gmail 不允许用别的地址发信，
-> 填了会被改写或直接拒收。
+免费 300 封/天，开通信这种量级够用很久。
+
+> ⚠️ **Resend 不适合现在这个阶段**：不验证域名的话，它只允许发给你注册
+> Resend 时用的那个邮箱，发给客户一律 403 —— 账号建得出来，信到不了。
+> 等买了域名再换 Resend（送达率更好），`MAIL_FROM` 换成 `no-reply@你的域名`。
+
+6. Brevo 默认开 IP 白名单，Render 的出站是共享网段 —— 去
+   [authorised_ips](https://app.brevo.com/security/authorised_ips) 加
+   `74.220.48.0/24` 和 `74.220.56.0/24`（服务页 Connect → Outbound 能看到当前值）
+
+通道优先级：`BREVO_API_KEY` → `RESEND_API_KEY` → SMTP。都没配也不会报错，
+只是建账号后开通信不自动发，管理站把链接摆出来让你手动转。
+
+</details>
 
 ---
 
@@ -56,16 +87,15 @@ V0.1 全部推上生产并验证过：客户端已无管理代码、后端 build
       PUBLIC_BASE_URL = https://hivora-agent-stage.onrender.com
       ```
 
-- [ ] **建 `hivora-admin` repo + Vercel 项目** · 你来 · 10 分钟 · **现在最要紧**
-      管理站已经从客户端摘掉了，但它自己还没上线 —— 也就是说**你现在没有地方进管理后台**。
-      ```bash
-      cd admin && git remote add origin git@github.com:xxXINTANGxx1027/hivora-admin.git
-      git push -u origin main
-      # 然后 Vercel New Project 指过去，无需构建配置
-      # 最后 Render: ALLOWED_ORIGINS 加上 https://hivora-admin.vercel.app
+- [x] ~~**管理站上线** · 已完成~~
+      不走 Vercel 了 —— 管理站直接挂在后端同源路径：
       ```
-      ⚠️ 漏了最后那步的现象是**「点登录完全没反应」**——浏览器在 CORS 预检就拦了，
-      页面拿不到任何响应，连错误提示都显示不出来。
+      https://hivora-agent-stage.onrender.com/console
+      ```
+      同源意味着**不用往 `ALLOWED_ORIGINS` 加任何域名**，也少一个要维护的托管项目。
+      `admin/index.html` 仍是唯一来源，`./sync-frontend.sh` 生成后端里那份
+      （`server/static/console.html`，后端地址留空 → 相对路径 → 永远同源）。
+      `admin` 那个 repo 保留，将来想独立托管随时可以。
 
 - [ ] **弄到真实条款 PDF，自己当代理人用一周** · 你来
       **这是产品能不能用的根本，而且只有你能做。** 线上条款库现在是空的，
@@ -75,7 +105,7 @@ V0.1 全部推上生产并验证过：客户端已无管理代码、后端 build
       admin 填邮箱和公司名 → 系统发一次性链接（48 小时、只能用一次、重发即作废）
       → 对方点进去**自己设密码** → 直接进 dashboard。密码全程不走邮件，
       管理员看不到也设不了别人的真密码，只能重发链接。用户自己随时能改密码。
-      **还需要你配 SMTP 变量**才会真的发出去 —— 不配的话管理站会把链接摆出来让你手动发。
+      **还需要你配发信通道**（`RESEND_API_KEY`）才会真的发出去 —— 不配的话管理站会把链接摆出来让你手动发。
 
 - [x] ~~**混合自动回复 + 白牌**（WP-7）· 已完成~~
       客户在 Telegram 问条款类问题，AI 直接答（带出处、免责声明、一条转人工的出路）；

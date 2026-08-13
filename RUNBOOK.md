@@ -11,7 +11,25 @@
 curl -s https://hivora-agent-stage.onrender.com/healthz    # 进程活着吗
 curl -s https://hivora-agent-stage.onrender.com/readyz     # 数据库通吗
 curl -s -o /dev/null -w "%{http_code}\n" https://hivora-frontend.vercel.app
+curl -s -o /dev/null -w "%{http_code}\n" https://hivora-agent-stage.onrender.com/console
 ```
+
+### 只有一套环境
+
+名字叫 stage，但它**跑的是真实数据和 Neon 生产库**。没有独立的预发环境 ——
+在这里改坏了就是改坏了。
+
+| 角色 | 地址 | 托管在 | 谁用 |
+|---|---|---|---|
+| 客户端 | `https://hivora-frontend.vercel.app` | Vercel（repo `hivora-frontend`） | 代理人 / 租户 |
+| 管理站 | `https://hivora-agent-stage.onrender.com/console` | Render，与后端同源 | 你（hivora admin） |
+| 后端 API | `https://hivora-agent-stage.onrender.com` | Render（repo `hivora-agent`） | 上面两个都调它 |
+| 终端客户 | `t.me/<各公司自己的 bot>` | Telegram | 租户的客户，**没有网页** |
+
+> ⚠️ **命名不一致**：后端带 `-stage`，前端不带。同一套环境两个名字，
+> 别误以为是两个环境。改前端域名要同步改 Render 的 `ALLOWED_ORIGINS`
+> 和 `APP_LOGIN_URL`（设密码链接靠它拼），漏一个的现象分别是
+> 「点登录没反应」和「开通信里的链接指向旧域名」。
 
 | 现象 | 结论 | 跳到 |
 |---|---|---|
@@ -89,8 +107,11 @@ cd frontend && git log --oneline -1 && git log --oneline -1 origin/main
 处理：把出问题的域名加进 Render 的 `ALLOWED_ORIGINS`（逗号分隔，不要有空格）：
 
 ```
-https://hivora-frontend.vercel.app,https://hivora-admin.vercel.app
+https://hivora-frontend.vercel.app
 ```
+
+> 管理站不在这里 —— 它跟后端同源（`/console`），浏览器根本不发预检。
+> 「管理站点登录没反应」不会是 CORS，去看 §1。
 
 ---
 
@@ -114,6 +135,40 @@ curl -s -H "Authorization: Bearer $ADMIN_TOKEN" \
 返回 **502「AI 服务暂时不可用」**= 模型侧的问题（超时、限流、余额）。应用本身是好的，客户数据不受影响。
 
 **注意**：如果代理人问条款问题得到「条款库里没查到相关内容」，这不是故障 —— 是他还没上传过条款 PDF。
+
+---
+
+## 5b. 邮件发不出去
+
+先看管理站点 ✉️ 发测试邮件的报错，它会说走的是哪条通道。日志关键词：`发信失败`、`Resend`。
+
+| 现象 | 原因 | 处理 |
+|---|---|---|
+| traceback 停在 `smtplib.py … _get_socket` | **Render 免费档封了出站 25/465/587**（2025-09 起） | 配 `RESEND_API_KEY` 走 HTTP，或升级付费实例 |
+| `SMTPAuthenticationError (535)` | Gmail 要应用专用密码，不是账号密码 | Google 账号 → 两步验证 → 应用专用密码 |
+| `Resend 拒绝了这封信 status=403` | 没验证域名时 Resend 只发给账号持有者本人 | 改用 Brevo（只需验证单个发件邮箱），或验证域名 |
+| `Brevo 拒绝了这封信 status=400 … not verified` | `MAIL_FROM` 那个邮箱没在 Brevo 的 Senders 里验证 | 去 Senders 加它，填收到的 6 位码 |
+| `Brevo … status=401 … unrecognised IP address` | Brevo 的 IP 白名单里没有 Render 的出站 IP | 见下 |
+| `status=401`（没提 IP） | key 不对或被撤销 | 重新生成 |
+
+**Brevo 的 IP 白名单**：Render 的出站不是固定 IP，而是两个**共享网段**
+（服务页 → **Connect → Outbound**，当前是 `74.220.48.0/24` 和 `74.220.56.0/24`，
+合计 512 个地址，同区域其他 Render 服务也在用）。
+
+处理顺序：
+
+1. 去 https://app.brevo.com/security/authorised_ips 试着直接加这两个 CIDR 段
+2. 不接受 CIDR 就**把 IP 白名单关掉** —— 这个功能假设你有固定出口 IP，
+   云上跑的服务没有，逐个加 512 个地址不现实
+
+> ⚠️ 只加报错里那**一个** IP 会变成**间歇性故障**：从同网段另一个出口走时才失败，
+> 比每次都失败难查得多。
+>
+> 关掉白名单之后，保护发信权限的就只剩 API key 本身了 —— 它泄露等于别人能用
+> 你验证过的发件人地址发信。key 只放 Render 环境变量，泄露了立刻在 Brevo 重新生成。
+
+> 两条通道都没配也不会出事：账号照常建，管理站把设密码链接摆出来让你手动转。
+> **发信失败从来不会让建账号失败** —— 这是设计上的硬规则。
 
 ---
 
@@ -166,9 +221,9 @@ cd server && .venv/bin/python -m pytest tests -q --ignore=tests/test_browser_smo
 cd server && .venv/bin/python -m pytest tests/test_browser_smoke.py -q
 ./sync-frontend.sh --check
 
-cd server && git push        # → Render，2-4 分钟
+cd server && git push        # → Render，2-4 分钟（后端 + 管理站 /console）
 cd frontend && git push      # → Vercel，<1 分钟
-cd admin && git push         # → Vercel（管理站）
+cd admin && git push         # 只是留档；线上那份由 server 带上去
 
 curl -s https://hivora-agent-stage.onrender.com/readyz    # 部署后必查
 ```
