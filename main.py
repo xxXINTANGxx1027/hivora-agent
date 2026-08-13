@@ -1306,11 +1306,13 @@ def admin_test_email(req: TestMailReq, adm: str = ADM):
         s.close()
     if not ok:
         # 服务商的原话直接给管理员看 —— 翻日志才能知道原因的话，这个按钮就白做了
-        # Brevo 默认开 IP 白名单，而 Render 有三个出站 IP —— 只加报错里那一个
-        # 会变成间歇性故障，所以这里明确让人去 Connect → Outbound 全加。
-        brevo_hint = ("Brevo 开了 IP 白名单。Render 服务页 Connect → Outbound 有三个"
-                      "出站 IP，全部加进 https://app.brevo.com/security/authorised_ips"
-                      "（只加报错里那一个会时好时坏）。"
+        # Brevo 默认开 IP 白名单，但 Render 的出站是两个共享 /24 网段（512 个地址），
+        # 只加报错里那一个必然时好时坏。加不了 CIDR 就只能把白名单关掉。
+        brevo_hint = ("Brevo 开了 IP 白名单，而 Render 的出站是共享网段"
+                      "（服务页 Connect → Outbound，形如 74.220.48.0/24），"
+                      "不是固定 IP。去 https://app.brevo.com/security/authorised_ips "
+                      "加这两个网段；加不了 CIDR 就把白名单关掉 —— "
+                      "只加报错里那一个 IP 会时好时坏。"
                       if "IP address" in err else
                       "MAIL_FROM 那个邮箱要先在 Brevo 的 Senders 里验证过"
                       "（它会发一个 6 位验证码到那个邮箱）。")
