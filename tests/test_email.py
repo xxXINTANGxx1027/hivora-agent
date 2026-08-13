@@ -356,6 +356,31 @@ def test_brevo_rejection_surfaces_the_reason(app_client, admin_token, monkeypatc
     assert "xkeysib-secret" not in detail, "API key 不能回显给前端"
 
 
+def test_brevo_ip_allowlist_error_says_to_add_all_render_ips(app_client, admin_token,
+                                                             monkeypatch):
+    """Brevo 默认开 IP 白名单，Render 有三个出站 IP —— 只加报错里那一个会时好时坏。"""
+    import io
+    import urllib.error
+
+    import email_out
+
+    def reject(req, timeout=None):
+        raise urllib.error.HTTPError(
+            req.full_url, 401, "Unauthorized", {},
+            io.BytesIO(b'{"message":"We have detected you are using an unrecognised '
+                       b'IP address 74.220.48.30."}'))
+
+    monkeypatch.setattr(email_out.urllib.request, "urlopen", reject)
+    monkeypatch.setattr(email_out, "BREVO_KEY", "xkeysib-x")
+    monkeypatch.setattr(email_out, "FROM", "Hivora <a@b.com>")
+    monkeypatch.setattr(email_out, "HOST", "")
+
+    detail = app_client.post("/api/admin/email/test", headers=H(admin_token),
+                             json={"to": "x@y.com"}).json()["detail"]
+    assert "authorised_ips" in detail and "Outbound" in detail
+    assert "Senders" not in detail, "IP 的问题别把人往验证发件人那边引"
+
+
 def test_settings_reports_brevo(app_client, admin_token, brevo):
     j = app_client.get("/api/admin/settings", headers=H(admin_token)).json()
     assert j["email_provider"] == "brevo" and j["email_configured"] is True
