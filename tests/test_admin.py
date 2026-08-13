@@ -1,9 +1,5 @@
 """V0.1 管理站：重置密码、套餐到期、审计日志、PDPA，以及前后台的分离。"""
-import pathlib
-
-from conftest import H
-
-ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+from conftest import SERVER_DIR, WORKSPACE, H, needs_workspace
 
 
 def _agent_id(client, admin_token, email):
@@ -154,22 +150,32 @@ def test_invite_endpoints_are_gone(app_client, admin_token):
 
 
 # ── 前后台分离的静态回归 ──────────────────────────────────────
-def _read(*parts):
-    return (ROOT.joinpath(*parts)).read_text(encoding="utf-8")
+def _read(path):
+    return path.read_text(encoding="utf-8")
+
+
+CLIENT_APP = SERVER_DIR / "static" / "index.html"
+CONSOLE_APP = SERVER_DIR / "static" / "console.html"
+LEAKS = ("api/admin", "loadAdmin", "makeInvite", "toggleAgent",
+         "hivora_role", "v-admin", "auth/register")
 
 
 def test_client_app_contains_no_admin_code():
     """客户拿到的包里不能有一行管理代码——这是拆站的全部意义。"""
-    for path in (("server", "static", "index.html"), ("frontend", "index.html")):
-        html = _read(*path)
-        leaked = [k for k in ("api/admin", "loadAdmin", "makeInvite", "toggleAgent",
-                              "hivora_role", "v-admin", "auth/register")
-                  if k in html]
-        assert not leaked, f"{'/'.join(path)} 里泄漏了管理代码：{leaked}"
+    leaked = [k for k in LEAKS if k in _read(CLIENT_APP)]
+    assert not leaked, f"server/static/index.html 里泄漏了管理代码：{leaked}"
+
+
+@needs_workspace
+def test_the_copy_vercel_serves_has_no_admin_code_either():
+    """frontend/ 是另一个 repo，只有在完整工作区里才看得到。"""
+    leaked = [k for k in LEAKS if k in _read(WORKSPACE / "frontend" / "index.html")]
+    assert not leaked, f"frontend/index.html 里泄漏了管理代码：{leaked}"
 
 
 def test_admin_app_escapes_and_is_noindex():
-    html = _read("admin", "index.html")
+    """查的是后端真正发出去的那份 console.html —— 它才是线上跑的东西。"""
+    html = _read(CONSOLE_APP)
     assert "const esc=" in html
     assert 'name="robots"' in html and "noindex" in html
     raw = ["${a.email}</td>", "${a.name}</td>", "${c.name}</td>", "${r.detail}</td>"]
@@ -197,25 +203,26 @@ def test_console_is_served_by_the_backend_itself():
         assert "api/admin" in r.text
 
 
+@needs_workspace
 def test_console_copy_stays_in_sync_with_admin_source():
     """admin/index.html 是唯一来源；改了不跑 sync-frontend.sh 就该红。"""
-    assert _strip_meta(_read("server", "static", "console.html")) == \
-           _strip_meta(_read("admin", "index.html"))
+    assert _strip_meta(_read(CONSOLE_APP)) == \
+           _strip_meta(_read(WORKSPACE / "admin" / "index.html"))
 
 
 def test_console_calls_its_own_origin():
     """后端自带的这份后端地址必须留空 —— 否则同源的意义就没了。"""
-    html = _read("server", "static", "console.html")
+    html = _read(CONSOLE_APP)
     assert '<meta name="hivora-api" content="">' in html
     assert "onrender.com" not in html
 
 
 def test_both_apps_read_backend_from_meta():
-    for path in (("server", "static", "index.html"), ("admin", "index.html")):
-        html = _read(*path)
+    for path in (CLIENT_APP, CONSOLE_APP):
+        html = _read(path)
         assert '<meta name="hivora-api"' in html
         assert "onrender.com" not in html.split("</head>")[1], \
-            f"{'/'.join(path)} 的 body 里硬编码了后端地址"
+            f"{path.name} 的 body 里硬编码了后端地址"
 
 
 # ── 二次确认（服务端强制，不只靠前端弹窗）────────────────────

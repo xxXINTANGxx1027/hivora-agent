@@ -1,11 +1,7 @@
 """可观测性、用量记账与配额、性能上限、限流落库 —— 「工程做到 A」这一批。"""
-import pathlib
-
 import pytest
 
-from conftest import H
-
-ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+from conftest import SERVER_DIR, WORKSPACE, H, needs_workspace
 
 
 # ── A1 可观测性 ───────────────────────────────────────────────
@@ -273,25 +269,29 @@ def test_successful_login_clears_the_lock(app_client, agent_factory):
 
 
 # ── A5/A6 运维资产存在性 ──────────────────────────────────────
-def test_backup_script_and_runbook_exist():
-    script = ROOT / "server" / "scripts" / "backup.sh"
+def test_backup_script_exists():
+    script = SERVER_DIR / "scripts" / "backup.sh"
     assert script.exists(), "没有备份脚本"
     body = script.read_text(encoding="utf-8")
     assert "pg_dump" in body
     assert "CREATE TABLE" in body, "备份没有做内容校验"
-    assert (ROOT / "server" / ".github" / "workflows" / "backup.yml").exists()
+    assert (SERVER_DIR / ".github" / "workflows" / "backup.yml").exists()
 
-    runbook = (ROOT / "RUNBOOK.md").read_text(encoding="utf-8")
-    for topic in ("readyz", "回滚", "恢复", "CORS", "PDPA"):
+
+@needs_workspace
+def test_runbook_covers_the_incidents_we_have_actually_had():
+    runbook = (WORKSPACE / "RUNBOOK.md").read_text(encoding="utf-8")
+    for topic in ("readyz", "回滚", "恢复", "CORS", "PDPA", "SMTP"):
         assert topic in runbook, f"RUNBOOK 没写 {topic}"
 
 
 # ── 部署工具链 ────────────────────────────────────────────────
+@needs_workspace
 def test_build_fingerprint_is_stable_and_api_independent():
     """指纹必须跟填哪个后端地址无关，否则没法拿本地的去比对线上的。"""
     import subprocess
-    src = ROOT / "server" / "static" / "index.html"
-    run = lambda *a: subprocess.run(["python3", str(ROOT / "stamp.py"), str(src), *a],
+    src = SERVER_DIR / "static" / "index.html"
+    run = lambda *a: subprocess.run(["python3", str(WORKSPACE / "stamp.py"), str(src), *a],
                                     capture_output=True, text=True, check=True).stdout
 
     want = run("--build-id").strip()
@@ -303,21 +303,23 @@ def test_build_fingerprint_is_stable_and_api_independent():
         assert got == want, f"换了 API_BASE 指纹就变了：{api}"
 
 
+@needs_workspace
 def test_deployed_frontend_can_be_verified():
     """frontend/index.html 里的指纹要跟源文件算出来的一致 —— push.sh 靠这个验部署。"""
     import re
     import subprocess
     want = subprocess.run(
-        ["python3", str(ROOT / "stamp.py"),
-         str(ROOT / "server" / "static" / "index.html"), "--build-id"],
+        ["python3", str(WORKSPACE / "stamp.py"),
+         str(SERVER_DIR / "static" / "index.html"), "--build-id"],
         capture_output=True, text=True, check=True).stdout.strip()
-    dest = (ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
+    dest = (WORKSPACE / "frontend" / "index.html").read_text(encoding="utf-8")
     got = re.search(r'hivora-build" content="([^"]*)"', dest).group(1)
     assert got == want, "frontend 没同步，跑 ./sync-frontend.sh"
 
 
+@needs_workspace
 def test_push_script_exists_and_is_runnable():
-    p = ROOT / "push.sh"
+    p = WORKSPACE / "push.sh"
     assert p.exists() and p.stat().st_mode & 0o111, "push.sh 不存在或没有执行权限"
     body = p.read_text(encoding="utf-8")
     assert "--status" in body

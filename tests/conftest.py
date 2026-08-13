@@ -10,6 +10,17 @@ import pytest
 SERVER_DIR = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SERVER_DIR))
 
+# 本地开发时 server/ 只是工作区里的一个子目录，旁边还有 admin/、frontend/、push.sh；
+# 但 server 是独立的 repo，CI 只 checkout 它自己，那些兄弟目录根本不存在。
+# 一律从 SERVER_DIR 出发算路径，跨 repo 的检查用 needs_workspace 标记跳过 ——
+# 之前假设「往上三层就是工作区根」，在 CI 里指向一个空目录，红了 9 个提交没人发现。
+WORKSPACE = next((p for p in SERVER_DIR.parents
+                  if (p / "admin" / "index.html").exists() and (p / "push.sh").exists()),
+                 None)
+needs_workspace = pytest.mark.skipif(
+    WORKSPACE is None,
+    reason="跨 repo 检查：server 单独 checkout 时看不到 admin/ frontend/ push.sh")
+
 _TMP = tempfile.mkdtemp(prefix="hivora-test-")
 os.environ.update(
     DATABASE_URL=f"sqlite:///{_TMP}/test.db",
