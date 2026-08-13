@@ -1306,11 +1306,13 @@ def admin_test_email(req: TestMailReq, adm: str = ADM):
         s.close()
     if not ok:
         # 服务商的原话直接给管理员看 —— 翻日志才能知道原因的话，这个按钮就白做了
-        hint = ("检查 RESEND_API_KEY，以及 MAIL_FROM 的域名是否已在 Resend 验证。"
-                "用 onboarding@resend.dev 时只能发给你注册 Resend 的那个邮箱。"
-                if how == "resend" else
-                "检查 SMTP_HOST / 端口 / 账号密码。"
-                "注意 Render 免费档封了 25/465/587，此时应改配 RESEND_API_KEY 走 HTTP。")
+        hint = {
+            "brevo": "MAIL_FROM 那个邮箱要先在 Brevo 的 Senders 里验证过"
+                     "（它会发一个 6 位验证码到那个邮箱）。",
+            "resend": "没验证域名的话，Resend 只允许发给你注册它时用的那个邮箱。"
+                      "要发给别人，改配 BREVO_API_KEY（只需验证单个发件邮箱，不用域名）。",
+        }.get(how, "检查 SMTP_HOST / 端口 / 账号密码。"
+                   "注意 Render 免费档封了 25/465/587，此时应改走 HTTP 通道。")
         raise HTTPException(502, f"发送失败（通道：{how}）\n\n"
                                  f"服务商原话：{err or '（无）'}\n\n{hint}")
     return {"ok": True}

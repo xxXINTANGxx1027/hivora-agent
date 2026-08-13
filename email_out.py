@@ -1,13 +1,15 @@
 """开通邮件 —— 管理员建完账号，自动把登录信息发给代理人。
 
-两条发信通道，都只用标准库，不引第三方 SDK：
+三条发信通道，都只用标准库，不引第三方 SDK。按这个顺序选：
 
-* **HTTP API（Resend）** —— 配了 `RESEND_API_KEY` 就走这条，请求打 443。
-* **SMTP** —— 退路。配 `SMTP_HOST` 等一组变量。
+1. **Brevo**（`BREVO_API_KEY`）—— **没有自己的域名时用这条。**
+   它允许只验证单个发件邮箱（收 6 位验证码），验完就能发给任何人。
+2. **Resend**（`RESEND_API_KEY`）—— 有域名之后的首选，送达率好。
+   ⚠️ 没验证域名时只能发给你注册 Resend 的那个邮箱，发别人一律 403。
+3. **SMTP**（`SMTP_HOST`）—— 退路。
 
-默认优先 HTTP，原因是实打实踩过的坑：**Render 免费档从 2025-09 起封了
-出站的 25 / 465 / 587**，SMTP 在 connect 阶段就超时，跟账号密码对不对无关。
-HTTP API 走 443，不受影响。付费实例上两条都能用。
+前两条都走 443。这不是偏好问题：**Render 免费档从 2025-09 起封了出站的
+25 / 465 / 587**，SMTP 在 connect 阶段就超时，跟账号密码对不对无关。
 
 两条硬规则：
 1. **两条都没配就整个降级为 no-op**，返回「没发」，绝不报错。
@@ -24,6 +26,7 @@ import ssl
 import urllib.error
 import urllib.request
 from email.message import EmailMessage
+from email.utils import parseaddr
 
 log = logging.getLogger("hivora.email")
 
@@ -36,6 +39,8 @@ LOGIN_URL = os.environ.get("APP_LOGIN_URL", "https://hivora-frontend.vercel.app"
 
 RESEND_KEY = os.environ.get("RESEND_API_KEY", "").strip()
 RESEND_URL = "https://api.resend.com/emails"
+BREVO_KEY = os.environ.get("BREVO_API_KEY", "").strip()
+BREVO_URL = "https://api.brevo.com/v3/smtp/email"
 # 发件人两条通道共用。没有自己的域名时可以先用 Resend 的 onboarding@resend.dev。
 FROM = (os.environ.get("MAIL_FROM", "").strip()
         or os.environ.get("SMTP_FROM", "").strip()
@@ -51,6 +56,8 @@ def provider() -> str:
     """当前生效的发信通道 —— 管理站拿它告诉你到底在走哪条路。"""
     if not FROM:
         return ""
+    if BREVO_KEY:
+        return "brevo"
     if RESEND_KEY:
         return "resend"
     return "smtp" if HOST else ""
@@ -60,7 +67,7 @@ def configured() -> bool:
     return bool(provider())
 
 
-def _resend_reason(raw: str) -> str:
+def _reason(raw: str) -> str:
     """从服务商的 JSON 里挑出人能看懂的那句。挑不出就原样返回。"""
     try:
         return json.loads(raw).get("message") or raw
@@ -68,24 +75,45 @@ def _resend_reason(raw: str) -> str:
         return raw
 
 
-def _send_resend(to: str, subject: str, body: str) -> tuple[bool, str]:
+def _post_json(who: str, url: str, headers: dict, payload: dict,
+               to: str) -> tuple[bool, str]:
+    """打一个 JSON API。返回 (成功, 失败原因)，从不抛异常。
+
+    失败原因里只有服务商的话，绝不含 API key、密码或邮件正文。
+    """
     req = urllib.request.Request(
-        RESEND_URL, method="POST",
-        data=json.dumps({"from": FROM, "to": [to],
-                         "subject": subject, "text": body}).encode("utf-8"),
-        headers={"Authorization": f"Bearer {RESEND_KEY}",
-                 "Content-Type": "application/json"})
+        url, method="POST", data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json", **headers})
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
             return 200 <= r.status < 300, ""
     except urllib.error.HTTPError as e:
-        # 记服务商的原话（不含我们的正文），否则「发不出去」根本没法查
         raw = (e.read() or b"")[:300].decode("utf-8", "replace")
-        log.warning("Resend 拒绝了这封信 to=%s status=%s %s", to, e.code, raw)
-        return False, f"{e.code}: {_resend_reason(raw)}"
+        log.warning("%s 拒绝了这封信 to=%s status=%s %s", who, to, e.code, raw)
+        return False, f"{e.code}: {_reason(raw)}"
     except Exception as e:
-        log.warning("Resend 调不通 to=%s", to, exc_info=True)
+        log.warning("%s 调不通 to=%s", who, to, exc_info=True)
         return False, f"{type(e).__name__}: {e}"
+
+
+def _from_parts() -> tuple[str, str]:
+    """把 "Hivora <a@b.com>" 拆成 (显示名, 地址)。Brevo 要分开传。"""
+    name, addr = parseaddr(FROM)
+    return name or "Hivora", addr or FROM
+
+
+def _send_brevo(to: str, subject: str, body: str) -> tuple[bool, str]:
+    name, addr = _from_parts()
+    return _post_json(
+        "Brevo", BREVO_URL, {"api-key": BREVO_KEY, "Accept": "application/json"},
+        {"sender": {"name": name, "email": addr}, "to": [{"email": to}],
+         "subject": subject, "textContent": body}, to)
+
+
+def _send_resend(to: str, subject: str, body: str) -> tuple[bool, str]:
+    return _post_json(
+        "Resend", RESEND_URL, {"Authorization": f"Bearer {RESEND_KEY}"},
+        {"from": FROM, "to": [to], "subject": subject, "text": body}, to)
 
 
 def send_detailed(to: str, subject: str, body: str) -> tuple[bool, str]:
@@ -97,10 +125,10 @@ def send_detailed(to: str, subject: str, body: str) -> tuple[bool, str]:
     if not how:
         log.info("没配发信通道，跳过发信 to=%s", to)
         return False, "没配发信通道"
-    if how == "resend":
-        ok, err = _send_resend(to, subject, body)
+    if how in ("brevo", "resend"):
+        ok, err = (_send_brevo if how == "brevo" else _send_resend)(to, subject, body)
         if ok:
-            log.info("已发信 to=%s subject=%s via=resend", to, subject)
+            log.info("已发信 to=%s subject=%s via=%s", to, subject, how)
         return ok, err
     msg = EmailMessage()
     msg["From"] = FROM

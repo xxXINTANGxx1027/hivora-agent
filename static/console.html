@@ -7,7 +7,7 @@
 <title>Hivora Admin · V0.1</title>
 <!-- 后端地址。换后端就改这一行。留空 = 同源。 -->
 <meta name="hivora-api" content="">
-<meta name="hivora-build" content="73ffa9159e9e">
+<meta name="hivora-build" content="ebcc03d7dd5c">
 <style>
   :root{
     --hivora:#1e6bf0; --hivora-dark:#1554c4; --hivora-light:#e8f0fe;
@@ -306,7 +306,7 @@ async function loadSettings(){
   const bad=[];
   if(SETTINGS.email_configured===false)
     bad.push("没配发信通道 —— 建账号后开通信不会自动发出，链接会显示在这里，需要你自己转给对方。"
-             +"最省事的是 Resend：注册拿 key，Render 里填 RESEND_API_KEY + MAIL_FROM");
+             +"没有域名的话用 Brevo：验证一个发件邮箱就能发给任何人");
   if(SETTINGS.telegram_ready===false)
     bad.push("没配 PUBLIC_BASE_URL —— 代理人连不了自己的 Telegram bot，客户渠道用不了");
   $("#caps").innerHTML=bad.length
@@ -316,12 +316,13 @@ async function loadSettings(){
 }
 async function testEmail(){
   if(SETTINGS.email_configured===false){
-    alert("还没配发信通道。二选一：\n\n"+
-          "① HTTP API（推荐，免费档也能用）\n"+
-          "   RESEND_API_KEY = re_...\n"+
-          "   MAIL_FROM      = Hivora <onboarding@resend.dev>\n\n"+
-          "② SMTP（Render 免费档封了 25/465/587，需要付费实例）\n"+
-          "   SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASSWORD / SMTP_FROM");
+    alert("还没配发信通道。没有自己的域名就用 Brevo：\n\n"+
+          "① Brevo（免费 300 封/天，只需验证一个发件邮箱）\n"+
+          "   BREVO_API_KEY = xkeysib-...\n"+
+          "   MAIL_FROM     = Hivora <你验证过的邮箱>\n\n"+
+          "② Resend（送达率更好，但没验证域名就只能发给你自己）\n"+
+          "   RESEND_API_KEY = re_...\n\n"+
+          "③ SMTP（Render 免费档封了 25/465/587，要付费实例）");
     return;
   }
   const to=(prompt("发到哪个邮箱？（用来验证 SMTP 配好了没）",

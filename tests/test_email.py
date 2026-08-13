@@ -52,6 +52,7 @@ def no_smtp(monkeypatch):
     monkeypatch.setattr(email_out, "HOST", "")
     monkeypatch.setattr(email_out, "FROM", "")
     monkeypatch.setattr(email_out, "RESEND_KEY", "")
+    monkeypatch.setattr(email_out, "BREVO_KEY", "")
 
 
 @pytest.fixture
@@ -77,10 +78,21 @@ def resend(monkeypatch):
 
     monkeypatch.setattr(email_out.urllib.request, "urlopen", fake_urlopen)
     monkeypatch.setattr(email_out, "RESEND_KEY", "re_test_key_123")
+    monkeypatch.setattr(email_out, "BREVO_KEY", "")
     monkeypatch.setattr(email_out, "FROM", "Hivora <onboarding@resend.dev>")
     monkeypatch.setattr(email_out, "HOST", "")      # 免费档上 SMTP 就是不可用的
     return type("R", (), {"calls": calls,
                           "mails": property(lambda self: [c["json"] for c in calls])})()
+
+
+@pytest.fixture
+def brevo(monkeypatch, resend):
+    """假的 Brevo HTTP API。复用 resend 那套假 urlopen，只换 key。"""
+    import email_out
+    monkeypatch.setattr(email_out, "BREVO_KEY", "xkeysib-test-123")
+    monkeypatch.setattr(email_out, "RESEND_KEY", "re_should_not_be_used")
+    monkeypatch.setattr(email_out, "FROM", "Hivora <xintang092@gmail.com>")
+    return resend
 
 
 def _create(app_client, admin_token, email, password="Welcome-2026x"):
@@ -254,7 +266,9 @@ def test_test_email_failure_points_at_the_right_channel(app_client, admin_token,
                         json={"to": "me@test.local"})
     assert r.status_code == 502
     detail = r.json()["detail"]
-    assert "RESEND_API_KEY" in detail and "SMTP_HOST" not in detail
+    assert "resend" in detail and "SMTP_HOST" not in detail
+    # 走 Resend 失败时要指出那条真正能用的路，而不是让人对着 Resend 死磕
+    assert "BREVO_API_KEY" in detail
     assert "nope" in detail, "服务商的原话得摆到管理员面前，不能只写进日志"
 
 
@@ -283,6 +297,68 @@ def test_test_email_shows_the_providers_own_words(app_client, admin_token, monke
     assert "owner@example.com" in detail, "原话被吞了"
     assert "403" in detail
     assert "re_secret_key" not in detail, "API key 不能回显给前端"
+
+
+# ── Brevo：没有域名时唯一能发给任何人的通道 ────────────────────
+# Resend 不验证域名就只能发给账号持有者自己；Brevo 只要验证单个发件邮箱。
+def test_brevo_sends_to_an_address_that_is_not_ours(app_client, admin_token, brevo):
+    r = _create(app_client, admin_token, "someone.else@icloud.com")
+    assert r.status_code == 200 and r.json()["email_sent"] is True
+
+    call = brevo.calls[-1]
+    assert call["url"] == "https://api.brevo.com/v3/smtp/email"
+    assert call["headers"]["api-key"] == "xkeysib-test-123"
+    assert call["json"]["to"] == [{"email": "someone.else@icloud.com"}]
+    assert "?setup=" in call["json"]["textContent"]
+
+
+@pytest.mark.parametrize("raw,want", [
+    ("Hivora <a@b.com>", ("Hivora", "a@b.com")),
+    ("bare@b.com", ("Hivora", "bare@b.com")),          # 没写显示名就回落
+    ("我的公司 <c@d.com>", ("我的公司", "c@d.com")),
+])
+def test_brevo_splits_the_from_header_into_name_and_address(monkeypatch, raw, want):
+    """Brevo 要 name 和 email 分开传，不吃 "Hivora <a@b.com>" 这种整串。"""
+    import email_out
+    monkeypatch.setattr(email_out, "FROM", raw)
+    assert email_out._from_parts() == want
+
+
+def test_brevo_wins_over_resend_and_smtp(brevo, monkeypatch):
+    """有域名之前 Brevo 才是能用的那条，所以它优先。"""
+    import email_out
+    monkeypatch.setattr(email_out, "HOST", "smtp.example.com")
+    assert email_out.provider() == "brevo"
+
+
+def test_brevo_rejection_surfaces_the_reason(app_client, admin_token, monkeypatch):
+    import io
+    import urllib.error
+
+    import email_out
+
+    def reject(req, timeout=None):
+        raise urllib.error.HTTPError(
+            req.full_url, 400, "Bad Request", {},
+            io.BytesIO(b'{"code":"invalid_parameter",'
+                       b'"message":"Sender email is not valid or not verified"}'))
+
+    monkeypatch.setattr(email_out.urllib.request, "urlopen", reject)
+    monkeypatch.setattr(email_out, "BREVO_KEY", "xkeysib-secret")
+    monkeypatch.setattr(email_out, "FROM", "Hivora <a@b.com>")
+    monkeypatch.setattr(email_out, "HOST", "")
+
+    r = app_client.post("/api/admin/email/test", headers=H(admin_token),
+                        json={"to": "x@y.com"})
+    detail = r.json()["detail"]
+    assert r.status_code == 502
+    assert "not verified" in detail and "Senders" in detail
+    assert "xkeysib-secret" not in detail, "API key 不能回显给前端"
+
+
+def test_settings_reports_brevo(app_client, admin_token, brevo):
+    j = app_client.get("/api/admin/settings", headers=H(admin_token)).json()
+    assert j["email_provider"] == "brevo" and j["email_configured"] is True
 
 
 # ── 重置密码 ──────────────────────────────────────────────────
