@@ -255,6 +255,34 @@ def test_test_email_failure_points_at_the_right_channel(app_client, admin_token,
     assert r.status_code == 502
     detail = r.json()["detail"]
     assert "RESEND_API_KEY" in detail and "SMTP_HOST" not in detail
+    assert "nope" in detail, "服务商的原话得摆到管理员面前，不能只写进日志"
+
+
+def test_test_email_shows_the_providers_own_words(app_client, admin_token, monkeypatch):
+    """Resend 拒信时，管理员不该还要去翻 Render 日志才知道为什么。"""
+    import io
+    import urllib.error
+
+    import email_out
+
+    def reject(req, timeout=None):
+        raise urllib.error.HTTPError(
+            req.full_url, 403, "Forbidden", {},
+            io.BytesIO(b'{"message":"You can only send testing emails to your own '
+                       b'email address (owner@example.com)."}'))
+
+    monkeypatch.setattr(email_out.urllib.request, "urlopen", reject)
+    monkeypatch.setattr(email_out, "RESEND_KEY", "re_secret_key")
+    monkeypatch.setattr(email_out, "FROM", "Hivora <onboarding@resend.dev>")
+    monkeypatch.setattr(email_out, "HOST", "")
+
+    r = app_client.post("/api/admin/email/test", headers=H(admin_token),
+                        json={"to": "someone@test.local"})
+    detail = r.json()["detail"]
+    assert r.status_code == 502
+    assert "owner@example.com" in detail, "原话被吞了"
+    assert "403" in detail
+    assert "re_secret_key" not in detail, "API key 不能回显给前端"
 
 
 # ── 重置密码 ──────────────────────────────────────────────────

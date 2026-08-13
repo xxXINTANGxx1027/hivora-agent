@@ -60,7 +60,15 @@ def configured() -> bool:
     return bool(provider())
 
 
-def _send_resend(to: str, subject: str, body: str) -> bool:
+def _resend_reason(raw: str) -> str:
+    """从服务商的 JSON 里挑出人能看懂的那句。挑不出就原样返回。"""
+    try:
+        return json.loads(raw).get("message") or raw
+    except Exception:
+        return raw
+
+
+def _send_resend(to: str, subject: str, body: str) -> tuple[bool, str]:
     req = urllib.request.Request(
         RESEND_URL, method="POST",
         data=json.dumps({"from": FROM, "to": [to],
@@ -69,28 +77,31 @@ def _send_resend(to: str, subject: str, body: str) -> bool:
                  "Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
-            return 200 <= r.status < 300
+            return 200 <= r.status < 300, ""
     except urllib.error.HTTPError as e:
         # 记服务商的原话（不含我们的正文），否则「发不出去」根本没法查
-        detail = (e.read() or b"")[:300].decode("utf-8", "replace")
-        log.warning("Resend 拒绝了这封信 to=%s status=%s %s", to, e.code, detail)
-        return False
-    except Exception:
+        raw = (e.read() or b"")[:300].decode("utf-8", "replace")
+        log.warning("Resend 拒绝了这封信 to=%s status=%s %s", to, e.code, raw)
+        return False, f"{e.code}: {_resend_reason(raw)}"
+    except Exception as e:
         log.warning("Resend 调不通 to=%s", to, exc_info=True)
-        return False
+        return False, f"{type(e).__name__}: {e}"
 
 
-def send(to: str, subject: str, body: str) -> bool:
-    """发一封纯文本邮件。成功返回 True，其余一律 False —— 从不抛异常。"""
+def send_detailed(to: str, subject: str, body: str) -> tuple[bool, str]:
+    """发信，并带回失败原因。给管理站用 —— 让管理员不用翻日志就知道卡在哪。
+
+    原因里只会有服务商的错误信息，绝不含邮件正文、密码或 API key。
+    """
     how = provider()
     if not how:
         log.info("没配发信通道，跳过发信 to=%s", to)
-        return False
+        return False, "没配发信通道"
     if how == "resend":
-        ok = _send_resend(to, subject, body)
+        ok, err = _send_resend(to, subject, body)
         if ok:
             log.info("已发信 to=%s subject=%s via=resend", to, subject)
-        return ok
+        return ok, err
     msg = EmailMessage()
     msg["From"] = FROM
     msg["To"] = to
@@ -110,11 +121,16 @@ def send(to: str, subject: str, body: str) -> bool:
                     s.login(USER, PASSWORD)
                 s.send_message(msg)
         log.info("已发信 to=%s subject=%s", to, subject)
-        return True
-    except Exception:
+        return True, ""
+    except Exception as e:
         # 只记异常类型和收件人，绝不把邮件正文写进日志——里面有密码
         log.warning("发信失败 to=%s", to, exc_info=True)
-        return False
+        return False, f"{type(e).__name__}: {e}"
+
+
+def send(to: str, subject: str, body: str) -> bool:
+    """发一封纯文本邮件。成功返回 True，其余一律 False —— 从不抛异常。"""
+    return send_detailed(to, subject, body)[0]
 
 
 # ── 具体的信 ──────────────────────────────────────────────────
