@@ -367,6 +367,41 @@ def test_steps_tick_off_as_the_agent_sets_up(app_client, agent_factory):
     assert o["done"] is False, "还没连 Telegram 就不该算完成"
 
 
+def _bind_a_device(email, chat_id="700001"):
+    """直接落一行已绑定设备。绑定流程本身在 test_telegram.py 里端到端测过。"""
+    import db
+    s = db.SessionLocal()
+    try:
+        key = s.query(db.Agent).filter_by(email=email).first().agent_key
+        s.add(db.TelegramChat(agent_id=key, chat_id=chat_id, name="代理人的手机"))
+        s.commit()
+    finally:
+        s.close()
+
+
+def test_connecting_the_bot_alone_does_not_finish_the_telegram_step(
+        app_client, agent_factory, monkeypatch):
+    """连了 bot 但没绑手机 = 客户来消息没人被叫醒。这一步不能算完成。"""
+    import telegram
+    monkeypatch.setattr(telegram, "call",
+                        lambda token, method, payload=None:
+                            {"username": "bot"} if method == "getMe" else {})
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://api.example.com")
+    tok, email = agent_factory()
+    app_client.post("/api/telegram/connect", headers=H(tok), json={"token": "111:AAA"})
+
+    step = next(s for s in app_client.get("/api/onboarding", headers=H(tok))
+                .json()["steps"] if s["key"] == "telegram")
+    assert step["done"] is False
+    assert step["bot"] is True, "前端要靠这个字段说清楚还差绑手机"
+    assert step["count"] == 0
+
+    _bind_a_device(email)
+    step = next(s for s in app_client.get("/api/onboarding", headers=H(tok))
+                .json()["steps"] if s["key"] == "telegram")
+    assert step["done"] is True and step["count"] == 1
+
+
 def test_onboarding_disappears_once_everything_is_done(app_client, agent_factory,
                                                        monkeypatch):
     import telegram
@@ -374,12 +409,13 @@ def test_onboarding_disappears_once_everything_is_done(app_client, agent_factory
                         lambda token, method, payload=None:
                             {"username": "bot"} if method == "getMe" else {})
     monkeypatch.setenv("PUBLIC_BASE_URL", "https://api.example.com")
-    tok, _ = agent_factory()
+    tok, email = agent_factory()
     app_client.post("/api/clients", headers=H(tok), json={"name": "客户"})
     app_client.post("/api/products", headers=H(tok), json={"name": "产品"})
     app_client.post("/api/documents", headers=H(tok),
                     files={"file": ("t.txt", "条款" * 30, "text/plain")})
     app_client.post("/api/telegram/connect", headers=H(tok), json={"token": "111:AAA"})
+    _bind_a_device(email)
 
     assert app_client.get("/api/onboarding", headers=H(tok)).json()["done"] is True
 

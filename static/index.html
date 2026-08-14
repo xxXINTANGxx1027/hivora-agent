@@ -625,6 +625,7 @@ const I18N={
   ob_title:"把它变成你自己的助手",ob_sub:"账号刚开通是空的。走完这四步，Hivora 才知道你卖什么、服务谁。",
   ob_docs:"上传条款 PDF —— 之后问条款会带出处",ob_products:"加你常卖的产品",
   ob_telegram:"连接 Telegram —— 客户找你直接进收件箱",ob_clients:"加第一个客户",
+  ob_tg_half:"bot 已连上，还差把你的手机绑定 —— 不绑就收不到客户消息的提醒",
   ob_go:"去做",
   dash_t:"今日总览",inbox_t:"客户对话",inbox_s:"客户 Telegram 消息 → AI 草拟 → 你确认后发送（AI 不直接面对客户）",
   train_t:"训练 & 问 Hivora",train_s:"左边教它（像教新员工）· 右边实时预览效果",
@@ -676,6 +677,7 @@ const I18N={
   ob_title:"Make it yours",ob_sub:"A new account starts empty. These four steps teach Hivora what you sell and who you serve.",
   ob_docs:"Upload a policy PDF — answers will cite it",ob_products:"Add the products you sell",
   ob_telegram:"Connect Telegram — clients reach your inbox",ob_clients:"Add your first client",
+  ob_tg_half:"Bot connected — now link your phone, or you get no alerts when clients write",
   ob_go:"Do it",
   dash_t:"Today's Overview",inbox_t:"Client Chats",inbox_s:"Client Telegram message → AI drafts → you confirm & send (AI never talks to clients directly)",
   train_t:"Train & Ask Hivora",train_s:"Teach it on the left (like a new hire) · live preview on the right",
@@ -981,7 +983,8 @@ async function loadOnboard(){
     <div class="ob-steps">${o.steps.map((st,i)=>`
       <div class="ob-step ${st.done?"on":""}">
         <span class="ob-n">${st.done?"✓":i+1}</span>
-        <span class="ob-t">${t("ob_"+st.key)}${st.done&&st.count?` · ${esc(st.count)}`:""}</span>
+        <span class="ob-t">${t("ob_"+st.key)}${st.done&&st.count?` · ${esc(st.count)}`:""}
+          ${!st.done&&st.bot?`<div class="sub" style="margin-top:2px">${t("ob_tg_half")}</div>`:""}</span>
         ${st.done?"":`<button class="btn" onclick="obGo(${i})">${t("ob_go")}</button>`}
       </div>`).join("")}</div></div>`;
 }

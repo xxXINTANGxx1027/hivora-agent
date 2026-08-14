@@ -707,3 +707,27 @@ def test_link_without_a_name_is_refused(app_client, agent_factory, fake_tg):
         s.close()
     assert app_client.post(f"/api/inbox/{s_id}/link", headers=H(tok),
                            json={}).status_code == 400
+
+
+def test_binding_a_phone_completes_the_onboarding_step(app_client, agent_factory,
+                                                       fake_tg):
+    """走真实绑定流程：扫码前那一步不算完成，绑完才算。"""
+    import db
+    import telegram
+    tok, email = agent_factory()
+    _connect(app_client, tok)
+    key, row = _bot_row(email)
+
+    step = lambda: next(s for s in app_client.get("/api/onboarding", headers=H(tok))
+                        .json()["steps"] if s["key"] == "telegram")
+    assert step()["done"] is False and step()["bot"] is True
+
+    code = app_client.post("/api/telegram/bindcode", headers=H(tok)).json()["code"]
+    s = db.SessionLocal()
+    try:
+        telegram.handle_update(s, row.path_secret, row.header_secret,
+                               _update(f"/start {code}", "700009", "我的手机"))
+    finally:
+        s.close()
+
+    assert step()["done"] is True and step()["count"] == 1

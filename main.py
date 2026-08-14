@@ -306,11 +306,15 @@ def onboarding(aid: str = AID):
     try:
         docs = db.live(s.query(db.Document), db.Document).filter_by(agent_id=aid).count()
         prods = s.query(Product).filter_by(agent_id=aid).count()
-        tg = s.query(db.TelegramBot).filter_by(agent_id=aid).first() is not None
+        # 连上 bot 只是一半：没把自己的手机绑上去，客户消息进来时没人会被叫醒，
+        # 而代理人几乎不会一直开着网页。所以这一步要两个条件都满足才算完成。
+        tg_bot = s.query(db.TelegramBot).filter_by(agent_id=aid).first() is not None
+        tg_devices = s.query(db.TelegramChat).filter_by(agent_id=aid).count()
         clients = db.live(s.query(Client), Client).filter_by(agent_id=aid).count()
         steps = [dict(key="docs", done=docs > 0, count=docs),
                  dict(key="products", done=prods > 0, count=prods),
-                 dict(key="telegram", done=tg, count=1 if tg else 0),
+                 dict(key="telegram", done=tg_bot and tg_devices > 0,
+                      count=tg_devices, bot=tg_bot),
                  dict(key="clients", done=clients > 0, count=clients)]
         return dict(steps=steps, done=all(x["done"] for x in steps))
     finally:
