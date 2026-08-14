@@ -291,17 +291,17 @@ def test_docs_live_in_the_repo_not_only_on_one_laptop():
     以前根目录和 server/ 各有一份，改了根目录那份，repo 里的悄悄变成旧版。
     现在 server/ 是唯一来源，根目录是软链。
     """
-    for name in ("RUNBOOK.md", "TODO.md", "QA.md", "AGENTS.md"):
+    for name in ("RUNBOOK.md", "TODO.md", "QA.md", "AGENTS.md",
+                 "push.sh", "stamp.py", "sync-frontend.sh"):
         assert (SERVER_DIR / name).is_file(), f"{name} 不在 repo 里"
 
 
 # ── 部署工具链 ────────────────────────────────────────────────
-@needs_workspace
 def test_build_fingerprint_is_stable_and_api_independent():
     """指纹必须跟填哪个后端地址无关，否则没法拿本地的去比对线上的。"""
     import subprocess
     src = SERVER_DIR / "static" / "index.html"
-    run = lambda *a: subprocess.run(["python3", str(WORKSPACE / "stamp.py"), str(src), *a],
+    run = lambda *a: subprocess.run(["python3", str(SERVER_DIR / "stamp.py"), str(src), *a],
                                     capture_output=True, text=True, check=True).stdout
 
     want = run("--build-id").strip()
@@ -319,7 +319,7 @@ def test_deployed_frontend_can_be_verified():
     import re
     import subprocess
     want = subprocess.run(
-        ["python3", str(WORKSPACE / "stamp.py"),
+        ["python3", str(SERVER_DIR / "stamp.py"),
          str(SERVER_DIR / "static" / "index.html"), "--build-id"],
         capture_output=True, text=True, check=True).stdout.strip()
     dest = (WORKSPACE / "frontend" / "index.html").read_text(encoding="utf-8")
@@ -327,9 +327,8 @@ def test_deployed_frontend_can_be_verified():
     assert got == want, "frontend 没同步，跑 ./sync-frontend.sh"
 
 
-@needs_workspace
 def test_push_script_exists_and_is_runnable():
-    p = WORKSPACE / "push.sh"
+    p = SERVER_DIR / "push.sh"
     assert p.exists() and p.stat().st_mode & 0o111, "push.sh 不存在或没有执行权限"
     body = p.read_text(encoding="utf-8")
     assert "--status" in body
