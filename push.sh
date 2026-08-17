@@ -18,7 +18,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   exit 2
 }
 API="${HIVORA_API_BASE:-https://hivora-agent-stage.onrender.com}"
-WEB="${HIVORA_WEB_URL:-https://hivora-frontend.vercel.app}"
+WEB="${HIVORA_WEB_URL:-https://hivora-insurance.vercel.app}"
 ADMIN_WEB="${HIVORA_ADMIN_URL:-$API/console}"   # 管理站跟后端同源；独立托管的话改这里
 DEPLOY_WAIT="${DEPLOY_WAIT:-420}"          # 等部署的秒数上限
 
