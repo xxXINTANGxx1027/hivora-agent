@@ -35,7 +35,7 @@ PORT = int(os.environ.get("SMTP_PORT", "587"))
 USER = os.environ.get("SMTP_USER", "").strip()
 PASSWORD = os.environ.get("SMTP_PASSWORD", "")
 TIMEOUT = int(os.environ.get("SMTP_TIMEOUT", "10"))
-LOGIN_URL = os.environ.get("APP_LOGIN_URL", "https://hivora-frontend.vercel.app").rstrip("/")
+LOGIN_URL = os.environ.get("APP_LOGIN_URL", "https://hivora-insurance.vercel.app").rstrip("/")
 
 RESEND_KEY = os.environ.get("RESEND_API_KEY", "").strip()
 RESEND_URL = "https://api.resend.com/emails"
