@@ -7,7 +7,7 @@
 <title>Hivora Admin · V0.1</title>
 <!-- 后端地址。换后端就改这一行。留空 = 同源。 -->
 <meta name="hivora-api" content="">
-<meta name="hivora-build" content="51af845a1d78">
+<meta name="hivora-build" content="cc416f493dcc">
 <style>
   :root{
     --hivora:#1e6bf0; --hivora-dark:#1554c4; --hivora-light:#e8f0fe;
@@ -265,7 +265,7 @@ function expiryPill(a){
 async function loadAgents(){
   AGENTS=await api("admin/agents");
   $("#tb-agents").innerHTML=
-    `<tr><th>账号</th><th>公司</th><th>套餐</th><th>到期</th><th>客户数</th><th>本月用量</th><th>状态</th><th></th></tr>`+
+    `<tr><th>账号</th><th>公司</th><th>套餐</th><th>到期</th><th>客户数</th><th>本月用量</th><th>Bot</th><th>状态</th><th></th></tr>`+
     AGENTS.map((a,i)=>`<tr>
       <td class="mono">${esc(a.email)}${a.role==="admin"?' <span class="pill blue">admin</span>':""}</td>
       <td>${esc(a.brand||a.name)}</td>
@@ -273,12 +273,14 @@ async function loadAgents(){
       <td>${expiryPill(a)}</td>
       <td class="mono">${esc(a.clients)}</td>
       <td class="mono">${usageCell(a)}</td>
+      <td class="mono">${a.tg?esc(a.tg):'<span style="color:var(--dim)">—</span>'}</td>
       <td><span class="pill ${a.active?"ok":"off"}">${a.active?"启用":"停用"}</span></td>
       <td><div class="row-actions">
         <button class="btn ghost sm" onclick="openPassword(${i})">重置密码</button>
         ${a.role==="admin"?"":`
         <button class="btn ghost sm" onclick="openPlan(${i})">套餐/到期</button>
         <button class="btn ghost sm" onclick="openQuota(${i})">额度</button>
+        <button class="btn ghost sm" onclick="openBot(${i})">Bot</button>
         <button class="btn ghost sm" onclick="toggleAgent(${i})">${a.active?"停用":"启用"}</button>
         <button class="btn ghost sm danger" onclick="deleteAgent(${i})">删除</button>`}
       </div></td></tr>`).join("");
@@ -440,6 +442,25 @@ function openCreate(){
     handover(r.email_sent,v.email,r.setup_link);
   });
 }
+/* 白手套：客户要显示自己公司名的 bot 时，由我们内部在 @BotFather 建好、
+   在这里把 token 挂到他名下 —— 客户零操作。共享官方 bot 改不了名，这是唯一出路。 */
+function openBot(i){
+  const a=AGENTS[i];
+  openModal(`Telegram bot · ${a.email}`,[
+    {id:"token",label:"BotFather token",ph:"123456789:AAxxxxxxxx",
+     hint:`现在：${a.tg||"未连接"} · 流程：@BotFather 发 /newbot，名字填客户的公司名，`+
+          `把 token 粘这里保存。客户界面上会自动变成新 bot。留空保存 = 断开现有连接。`},
+  ],async v=>{
+    if(v.token){
+      await post(`admin/agents/${a.id}/telegram`,{token:v.token});
+    }else{
+      if(!a.tg)throw new Error("请粘贴 token");
+      if(!confirm(`断开「${a.email}」的 ${a.tg}？\n\n对方的 Telegram 渠道会立刻停用。`))return;
+      await post(`admin/agents/${a.id}/telegram/disconnect`,{});
+    }
+    loadAgents();
+  });
+}
 function openQuota(i){
   const a=AGENTS[i];
   openModal(`月度 AI 额度 · ${a.email}`,[
@@ -490,7 +511,7 @@ const ACTIONS=["login","add_client","edit_client","add_policy","edit_policy","ad
                "add_product","teach","upload_doc","suggest","send","opportunity",
                "ai_action","chat","delete_client","delete_policy","restore_client",
                "admin_create_agent","toggle_agent","reset_password","set_plan","purge_client",
-               "delete_agent"];
+               "delete_agent","admin_attach_bot","admin_detach_bot"];
 function fillAgentSelects(){
   const opts=AGENTS.map(a=>`<option value="${esc(a.agent_key)}">${esc(a.email)}</option>`).join("");
   const fa=$("#f-agent"),pa=$("#p-agent");

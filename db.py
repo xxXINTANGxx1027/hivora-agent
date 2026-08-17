@@ -478,3 +478,66 @@ def migrate_columns():
         except Exception as e:
             conn.rollback()
             log.error("migrate FAILED: products backfill → %s", e)
+
+
+# ── 回收站自动清理 ────────────────────────────────────────────
+# /api/delete 答应用户「可恢复 N 天」；到期就该真删，PDPA 的存储最小化才闭环。
+TRASH_KEEP_DAYS = int(os.environ.get("TRASH_KEEP_DAYS", "30"))
+_last_purge_day = ""
+
+
+def purge_expired_trash(days: int = None) -> dict:
+    """真删回收站里超期的记录。返回各类型删了多少（空 dict = 没有到期的）。"""
+    days = TRASH_KEEP_DAYS if days is None else days
+    if days <= 0:                       # 0/负数 = 关闭自动清理
+        return {}
+    cutoff = (dt.datetime.now() - dt.timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    s = SessionLocal()
+    try:
+        def expired(model):
+            return s.query(model).filter(model.deleted.isnot(None),
+                                         model.deleted != "",
+                                         model.deleted < cutoff)
+        out = {}
+        # 客户连带它全部保单（保单可能没有自己的删除时间戳）
+        pol = 0
+        clients = expired(Client).all()
+        for c in clients:
+            pol += s.query(Policy).filter_by(client_id=c.id).delete(synchronize_session=False)
+            s.delete(c)
+        if clients:
+            out["clients"] = len(clients)
+        pol += expired(Policy).delete(synchronize_session=False)
+        if pol:
+            out["policies"] = pol
+        for key, model in (("appointments", Appointment), ("facts", Fact)):
+            n = expired(model).delete(synchronize_session=False)
+            if n:
+                out[key] = n
+        docs = expired(Document).all()          # 逐个删走 ORM，chunks 级联跟着走
+        for d in docs:
+            s.delete(d)
+        if docs:
+            out["documents"] = len(docs)
+        if out:
+            audit(s, "system", "trash_autopurge",
+                  " ".join(f"{k}={v}" for k, v in out.items()))
+        s.commit()
+        return out
+    finally:
+        s.close()
+
+
+def maybe_purge_trash():
+    """每天最多跑一次的入口。挂在启动和 /healthz 上，不需要独立的定时器。"""
+    global _last_purge_day
+    d = today().isoformat()
+    if d == _last_purge_day:
+        return
+    _last_purge_day = d
+    try:
+        out = purge_expired_trash()
+        if out:
+            log.warning("回收站自动清理: %s", out)
+    except Exception:
+        log.exception("回收站自动清理失败（不影响启动）")

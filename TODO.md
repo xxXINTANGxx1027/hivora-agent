@@ -81,23 +81,25 @@ V0.1 全部推上生产并验证过：客户端已无管理代码、后端 build
 
 ## P0 · 发第一个付费账号之前
 
-- [ ] **建官方 Telegram bot，配 `PLATFORM_BOT_TOKEN`** · 你来 · 5 分钟
-      找 @BotFather 发 /newbot 建一个（比如 @HivoraAssistantBot），token 填进
-      Render Environment 的 `PLATFORM_BOT_TOKEN`。配好后代理人连 Telegram 变成
-      **一键接入**（不用自己建 bot 贴 token）；不配则只有自建 bot 一条路。
-      客户归属靠每个代理人的专属 /start 链接，陌生人不走链接绝不会被派给任何租户。
+- [x] ~~**建官方 Telegram bot，配 `PLATFORM_BOT_TOKEN`** · 已完成（2026-08-17）~~
+      @hivora_insuranceagent_bot 已建好，token 在 Render Environment。
+      代理人「⚡ 一键连接」实测通了。**遗留**：token 在聊天里出现过，
+      正式交付前找 @BotFather 发 `/revoke` 换一次，把新值更新到 Render。
 
-- [ ] **建官方 Telegram bot，配 `PLATFORM_BOT_TOKEN`** · 你来 · 5 分钟
-      找 @BotFather 发 /newbot 建一个（比如 @HivoraAssistantBot），token 填进
-      Render Environment 的 `PLATFORM_BOT_TOKEN`。配好后代理人连 Telegram 变成
-      **一键接入**（不用自己建 bot 贴 token）；不配则只有自建 bot 一条路。
-      客户归属靠每个代理人的专属 /start 链接，陌生人不走链接绝不会被派给任何租户。
+- [x] ~~**Render 加 `PUBLIC_BASE_URL`** · 已完成~~
 
-- [ ] **Render 加 `PUBLIC_BASE_URL`** · 你来 · 2 分钟
-      Telegram 要靠它回调。不配的话代理人点「连接 Telegram」直接报错，客户渠道整个不能用。
-      ```
-      PUBLIC_BASE_URL = https://hivora-agent-stage.onrender.com
-      ```
+- [x] ~~**白手套接 bot**（客户要自己品牌名时）· 已完成（2026-08-17）~~
+      管理站账号列表多了「Bot」按钮：内部在 @BotFather 用客户公司名建 bot，
+      token 粘进去保存 —— 客户零操作得到专属品牌 bot。留空保存 = 断开。
+      从官方共享 bot 升级会自动清掉旧的设备绑定（要用新 bot 重新绑）。
+
+- [x] ~~**删除账号（连数据清除）** · 已完成（2026-08-17）~~
+      管理站每行红色「删除」：两道确认 + 打邮箱，租户全部数据一起真删（PDPA）。
+      误建重来、试用清场用它；暂停合作仍用「停用」。
+
+- [x] ~~**回收站超期自动真删** · 已完成（2026-08-17）~~
+      软删满 `TRASH_KEEP_DAYS`（默认 30 天，跟界面「可恢复 30 天」的承诺同一个数）
+      自动真删，挂在启动和 /healthz 心跳上，每天最多跑一次，动作记审计。
 
 - [x] ~~**管理站上线** · 已完成~~
       不走 Vercel 了 —— 管理站直接挂在后端同源路径：

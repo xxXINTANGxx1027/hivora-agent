@@ -97,6 +97,7 @@ db.migrate_columns()
 db.seed_if_empty()
 auth.ensure_demo_agent()
 auth.ensure_admin()
+db.maybe_purge_trash()
 AID = Depends(auth.current_agent)
 ADM = Depends(auth.current_admin)
 
@@ -140,7 +141,8 @@ BUILD = (os.environ.get("RENDER_GIT_COMMIT")
 
 @app.get("/healthz")
 def healthz():
-    """存活探针 —— 只说明进程还在。"""
+    """存活探针 —— 只说明进程还在。顺路当回收站清理的心跳（每天最多真跑一次）。"""
+    db.maybe_purge_trash()
     return {"ok": True, "model": MODEL, "version": VERSION, "build": BUILD}
 
 
@@ -781,7 +783,7 @@ def opportunity(req: OppReq, aid: str = AID):
 # 代理人自己删 = 软删（可恢复）；PDPA 的"被遗忘权"由管理员硬删接口彻底清除。
 SOFT_KINDS = {"client": Client, "policy": Policy, "appointment": Appointment,
               "fact": Fact, "document": db.Document}
-TRASH_KEEP_DAYS = int(os.environ.get("TRASH_KEEP_DAYS", "30"))
+TRASH_KEEP_DAYS = db.TRASH_KEEP_DAYS   # 「可恢复 N 天」的承诺和自动清理必须是同一个数
 
 
 class DelReq(BaseModel):
@@ -1140,11 +1142,21 @@ def admin_agents(_: str = ADM):
                             + func.sum(db.UsageDaily.completion_tokens))
                     .filter(db.UsageDaily.day.like(month + "%"))
                     .group_by(db.UsageDaily.agent_id).all())
+        bots = {b.agent_id: b for b in s.query(db.TelegramBot).all()}
+
+        def _tg(key):
+            b = bots.get(key)
+            if not b:
+                return ""
+            return "官方 bot" if (getattr(b, "mode", "own") or "own") == "platform" \
+                else "@" + (b.username or "?")
+
         return [dict(id=a.id, email=a.email, name=a.name, role=a.role,
                      active=bool(a.active), plan=a.plan, expires=a.expires or "",
                      agent_key=a.agent_key, clients=counts.get(a.agent_key, 0),
                      tokens=int(used.get(a.agent_key, 0) or 0),
                      token_quota=a.token_quota or 0, brand=a.brand or "",
+                     tg=_tg(a.agent_key),
                      auto_reply=bool(a.auto_reply if a.auto_reply is not None else 1))
                 for a in s.query(db.Agent).order_by(db.Agent.id).all()]
     finally:
@@ -1210,6 +1222,51 @@ def admin_delete_agent(agent_id: int, req: DeleteAgentReq, adm: str = ADM):
         db.audit(s, adm, "delete_agent", email)
         s.commit()
         return dict(ok=True)
+    finally:
+        s.close()
+
+
+class AttachBotReq(BaseModel):
+    token: str
+
+
+@app.post("/api/admin/agents/{agent_id}/telegram")
+def admin_attach_bot(agent_id: int, req: AttachBotReq, adm: str = ADM):
+    """白手套：内部替客户在 BotFather 建好 bot，把 token 挂到他名下。
+    客户零操作就得到显示自己公司名的专属 bot（共享官方 bot 做不到改名）。"""
+    s = SessionLocal()
+    try:
+        a = s.query(db.Agent).filter_by(id=agent_id).first()
+        if not a:
+            raise HTTPException(404, "账号不存在")
+        row = s.query(db.TelegramBot).filter_by(agent_id=a.agent_key).first()
+        if row is not None and (getattr(row, "mode", "own") or "own") == "platform":
+            # 从官方共享 bot 换到专属 bot：设备绑定和客户会话都是跟旧 bot 的对话，
+            # 带不过来，清掉让对方用新 bot 重新绑（收件箱里的历史 thread 不动）
+            s.query(db.TelegramChat).filter_by(agent_id=a.agent_key).delete()
+            s.query(db.TelegramBind).filter_by(agent_id=a.agent_key).delete()
+        try:
+            info = telegram.connect(s, a.agent_key, req.token)
+        except telegram.TelegramError as e:
+            raise HTTPException(400, str(e))
+        db.audit(s, adm, "admin_attach_bot", f"{a.email}:@{info.get('username', '')}")
+        s.commit()
+        return {"ok": True, **info}
+    finally:
+        s.close()
+
+
+@app.post("/api/admin/agents/{agent_id}/telegram/disconnect")
+def admin_detach_bot(agent_id: int, adm: str = ADM):
+    s = SessionLocal()
+    try:
+        a = s.query(db.Agent).filter_by(id=agent_id).first()
+        if not a:
+            raise HTTPException(404, "账号不存在")
+        telegram.disconnect(s, a.agent_key)
+        db.audit(s, adm, "admin_detach_bot", a.email)
+        s.commit()
+        return {"ok": True}
     finally:
         s.close()
 

@@ -164,6 +164,7 @@ def connect(s, agent_id: str, token: str) -> dict:
     if row is None:
         row = db.TelegramBot(agent_id=agent_id)
         s.add(row)
+    row.mode = "own"        # 可能是从官方共享 bot 升级过来的，必须显式切回来
     row.username = username
     row.token_enc = encrypt(token)
     row.path_secret = row.path_secret or secrets.token_urlsafe(24)
