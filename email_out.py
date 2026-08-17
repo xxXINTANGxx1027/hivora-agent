@@ -36,6 +36,10 @@ USER = os.environ.get("SMTP_USER", "").strip()
 PASSWORD = os.environ.get("SMTP_PASSWORD", "")
 TIMEOUT = int(os.environ.get("SMTP_TIMEOUT", "10"))
 LOGIN_URL = os.environ.get("APP_LOGIN_URL", "https://hivora-insurance.vercel.app").rstrip("/")
+if "hivora-frontend.vercel.app" in LOGIN_URL:
+    # 旧门户域名（Vercel 项目改名后 404）。线上环境变量可能还留着它，
+    # 自动纠正，免得开通邮件发出去是死链接。
+    LOGIN_URL = "https://hivora-insurance.vercel.app"
 
 RESEND_KEY = os.environ.get("RESEND_API_KEY", "").strip()
 RESEND_URL = "https://api.resend.com/emails"
