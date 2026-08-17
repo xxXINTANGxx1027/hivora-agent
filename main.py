@@ -1251,7 +1251,14 @@ def admin_attach_bot(agent_id: int, req: AttachBotReq, adm: str = ADM):
             raise HTTPException(400, str(e))
         db.audit(s, adm, "admin_attach_bot", f"{a.email}:@{info.get('username', '')}")
         s.commit()
-        return {"ok": True, **info}
+        # 白手套要一杆到底：客户不该登门户来绑设备。这里直接生成一条
+        # 一键绑定链接（点开按 Start 就绑好），由管理员转给客户本人。
+        # 24 小时有效——它等于客户的身份，只能发给客户自己。
+        bind_link = ""
+        if info.get("username"):
+            code = telegram.new_bind_code(s, a.agent_key, ttl=24 * 3600)
+            bind_link = f"https://t.me/{info['username']}?start={code}"
+        return {"ok": True, "bind_link": bind_link, **info}
     finally:
         s.close()
 

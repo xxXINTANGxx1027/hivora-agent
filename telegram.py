@@ -250,10 +250,13 @@ def status(s, agent_id: str) -> dict:
                             created=c.created) for c in chats])
 
 
-def new_bind_code(s, agent_id: str) -> str:
+def new_bind_code(s, agent_id: str, ttl: int = None) -> str:
+    """ttl 默认 10 分钟（代理人自己当场绑）。白手套交付时管理员代生成的链接
+    要经 WhatsApp 转给客户，给长一点——但它等于客户的身份，不能无限期。"""
     s.query(db.TelegramBind).filter(db.TelegramBind.expires < time.time()).delete()
     code = "HV" + secrets.token_hex(3).upper()
-    s.add(db.TelegramBind(code=code, agent_id=agent_id, expires=time.time() + BIND_TTL))
+    s.add(db.TelegramBind(code=code, agent_id=agent_id,
+                          expires=time.time() + (ttl or BIND_TTL)))
     s.commit()
     return code
 

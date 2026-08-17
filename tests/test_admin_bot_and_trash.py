@@ -129,3 +129,41 @@ def test_expired_trash_is_purged_but_fresh_trash_survives(app_client, agent_fact
 def test_purge_disabled_when_days_nonpositive(app_client):
     import db
     assert db.purge_expired_trash(0) == {}
+
+
+def test_white_glove_bind_link_binds_client_in_one_tap(app_client, admin_token,
+                                                       agent_factory, fake_platform):
+    """交付闭环：管理员挂 bot 拿到绑定链接 → 客户点开（= /start <码>）→ 绑定完成，
+    客户全程不登网页。"""
+    import db
+    tok, email = agent_factory()
+    aid = _agent_id(app_client, admin_token, email)
+
+    r = app_client.post(f"/api/admin/agents/{aid}/telegram", headers=H(admin_token),
+                        json={"token": "111222:ABCCLIENT"})
+    link = r.json()["bind_link"]
+    assert "t.me/abc_insurance_bot?start=HV" in link
+    code = link.split("start=")[1]
+
+    # 客户点深链后 Telegram 自动替他发 /start <code> —— 模拟这条 webhook
+    s = db.SessionLocal()
+    try:
+        agent_key = next(a["agent_key"] for a in
+                         app_client.get("/api/admin/agents", headers=H(admin_token)).json()
+                         if a["email"] == email)
+        bot = s.query(db.TelegramBot).filter_by(agent_id=agent_key).first()
+        path_secret, header_secret = bot.path_secret, bot.header_secret
+    finally:
+        s.close()
+
+    rr = app_client.post(
+        f"/api/tg/{path_secret}",
+        json={"message": {"text": f"/start {code}",
+                          "chat": {"id": 424242, "first_name": "Client"}}},
+        headers={"X-Telegram-Bot-Api-Secret-Token": header_secret})
+    assert rr.status_code == 200
+
+    st = app_client.get("/api/telegram", headers=H(tok)).json()
+    assert any(c.get("chat_id") == "424242" for c in st.get("chats", [])), \
+        "客户点完链接就该出现在已绑定设备里"
+    assert any("绑定成功" in t for _, t in fake_platform.sent)

@@ -7,7 +7,7 @@
 <title>Hivora Admin · V0.1</title>
 <!-- 后端地址。换后端就改这一行。留空 = 同源。 -->
 <meta name="hivora-api" content="">
-<meta name="hivora-build" content="cc416f493dcc">
+<meta name="hivora-build" content="08c8bcde1fa6">
 <style>
   :root{
     --hivora:#1e6bf0; --hivora-dark:#1554c4; --hivora-light:#e8f0fe;
@@ -449,10 +449,15 @@ function openBot(i){
   openModal(`Telegram bot · ${a.email}`,[
     {id:"token",label:"BotFather token",ph:"123456789:AAxxxxxxxx",
      hint:`现在：${a.tg||"未连接"} · 流程：@BotFather 发 /newbot，名字填客户的公司名，`+
-          `把 token 粘这里保存。客户界面上会自动变成新 bot。留空保存 = 断开现有连接。`},
+          `把 token 粘这里保存 —— 会得到一条发给客户的一键绑定链接，客户点开按 Start `+
+          `就绑好，全程不用登网页。重新粘同一个 token 可再生成链接。留空保存 = 断开。`},
   ],async v=>{
     if(v.token){
-      await post(`admin/agents/${a.id}/telegram`,{token:v.token});
+      const r=await post(`admin/agents/${a.id}/telegram`,{token:v.token});
+      if(r.bind_link)
+        prompt(`✅ bot 已挂到「${a.email}」名下。\n\n`+
+               `把下面这条链接用 WhatsApp 发给客户本人（24 小时有效，等于他的身份，`+
+               `别发给其他人）。他点开按 Start 就完成绑定：`,r.bind_link);
     }else{
       if(!a.tg)throw new Error("请粘贴 token");
       if(!confirm(`断开「${a.email}」的 ${a.tg}？\n\n对方的 Telegram 渠道会立刻停用。`))return;
