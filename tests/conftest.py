@@ -31,6 +31,10 @@ os.environ.update(
     ALLOWED_ORIGINS="*",   # 浏览器冒烟的静态站端口随机，没法预先白名单
 )
 os.environ.pop("OPENROUTER_API_KEY", None)   # 测试绝不打真实模型
+# 基线=未配置平台 bot；平台用例自己 monkeypatch 注入。
+# 注意要设空串占位而不是 pop：graph.py 的 load_dotenv() 只补缺失的变量，
+# pop 掉反而会被开发机 .env 里的真 token 灌回来。
+os.environ["PLATFORM_BOT_TOKEN"] = ""
 os.environ.pop("HIVORA_ENV", None)
 
 
