@@ -7,7 +7,7 @@
 <title>Hivora Admin · V0.1</title>
 <!-- 后端地址。换后端就改这一行。留空 = 同源。 -->
 <meta name="hivora-api" content="">
-<meta name="hivora-build" content="ebcc03d7dd5c">
+<meta name="hivora-build" content="51af845a1d78">
 <style>
   :root{
     --hivora:#1e6bf0; --hivora-dark:#1554c4; --hivora-light:#e8f0fe;
@@ -49,6 +49,8 @@
   .btn.ghost{background:none;color:var(--hivora-dark);border:1px solid var(--line)}
   .btn.ghost:hover{background:var(--hivora-light)}
   .btn.danger{background:var(--red)}
+  .btn.ghost.danger{background:none;color:var(--red);border-color:var(--red)}
+  .btn.ghost.danger:hover{background:#fdecec}
   .btn.sm{padding:4px 9px;font-size:11.5px;border-radius:6px}
   .btn:focus-visible,input:focus-visible,select:focus-visible,nav.tabs button:focus-visible{
     outline:2px solid var(--hivora);outline-offset:2px}
@@ -277,7 +279,8 @@ async function loadAgents(){
         ${a.role==="admin"?"":`
         <button class="btn ghost sm" onclick="openPlan(${i})">套餐/到期</button>
         <button class="btn ghost sm" onclick="openQuota(${i})">额度</button>
-        <button class="btn ghost sm" onclick="toggleAgent(${i})">${a.active?"停用":"启用"}</button>`}
+        <button class="btn ghost sm" onclick="toggleAgent(${i})">${a.active?"停用":"启用"}</button>
+        <button class="btn ghost sm danger" onclick="deleteAgent(${i})">删除</button>`}
       </div></td></tr>`).join("");
   fillAgentSelects();
 }
@@ -298,6 +301,18 @@ async function toggleAgent(i){
     await post(`admin/agents/${a.id}/toggle`,{active:false,confirm:typed});
     loadAgents();
   }catch(e){alert("❌ "+(e.message||"停用失败"));}
+}
+async function deleteAgent(i){
+  const a=AGENTS[i];
+  /* 删除比停用重得多：租户全部数据一起清、不可恢复 —— 同样两道确认 + 打邮箱 */
+  if(!confirm(`删除「${a.email}」？\n\n该账号和它的全部数据（客户、保单、对话、文档、Telegram 绑定）`+
+              `会被彻底清除，不可恢复。\n\n只是暂停合作请用「停用」。`))return;
+  const typed=prompt(`确认删除（不可恢复）。请把邮箱原样打一遍：\n${a.email}`,"");
+  if(typed===null)return;
+  try{
+    await post(`admin/agents/${a.id}/delete`,{confirm:typed});
+    loadAgents();
+  }catch(e){alert("❌ "+(e.message||"删除失败"));}
 }
 
 let SETTINGS={};
@@ -474,7 +489,8 @@ function openPlan(i){
 const ACTIONS=["login","add_client","edit_client","add_policy","edit_policy","add_appt",
                "add_product","teach","upload_doc","suggest","send","opportunity",
                "ai_action","chat","delete_client","delete_policy","restore_client",
-               "admin_create_agent","toggle_agent","reset_password","set_plan","purge_client"];
+               "admin_create_agent","toggle_agent","reset_password","set_plan","purge_client",
+               "delete_agent"];
 function fillAgentSelects(){
   const opts=AGENTS.map(a=>`<option value="${esc(a.agent_key)}">${esc(a.email)}</option>`).join("");
   const fa=$("#f-agent"),pa=$("#p-agent");

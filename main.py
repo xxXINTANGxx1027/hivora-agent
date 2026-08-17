@@ -1176,6 +1176,44 @@ def admin_toggle(agent_id: int, req: ToggleReq, adm: str = ADM):
         s.close()
 
 
+class DeleteAgentReq(BaseModel):
+    confirm: str = ""      # 必须把邮箱原样打一遍
+
+
+@app.post("/api/admin/agents/{agent_id}/delete")
+def admin_delete_agent(agent_id: int, req: DeleteAgentReq, adm: str = ADM):
+    """彻底删除账号和该租户的全部数据，不可恢复。误建重来、试用结束清场时用。
+    区别于「停用」：停用保数据可再启用；删除是 PDPA 意义上的清除。"""
+    s = SessionLocal()
+    try:
+        a = s.query(db.Agent).filter_by(id=agent_id).first()
+        if not a:
+            raise HTTPException(404, "账号不存在")
+        if a.role == "admin":
+            raise HTTPException(400, "不能删除管理员")
+        if (req.confirm or "").strip().lower() != (a.email or "").lower():
+            raise HTTPException(400, f"删除不可恢复。请把邮箱原样打一遍确认：{a.email}")
+        key, email = a.agent_key, a.email
+        # 自建 bot 顺手注销 webhook；平台共享 webhook 内部会跳过，动不得
+        telegram.disconnect(s, key)
+        cids = [cid for (cid,) in s.query(db.Client.id).filter(db.Client.agent_id == key)]
+        if cids:
+            s.query(db.Policy).filter(db.Policy.client_id.in_(cids)).delete(synchronize_session=False)
+        tids = [tid for (tid,) in s.query(db.Thread.id).filter(db.Thread.agent_id == key)]
+        if tids:
+            s.query(db.Message).filter(db.Message.thread_id.in_(tids)).delete(synchronize_session=False)
+        for M in (db.Client, db.Thread, db.Appointment, db.Fact, db.Product,
+                  db.UsageDaily, db.SetupToken, db.Chunk, db.Document, db.Audit):
+            s.query(M).filter(M.agent_id == key).delete(synchronize_session=False)
+        s.query(db.LoginLock).filter_by(email=email).delete(synchronize_session=False)
+        s.delete(a)
+        db.audit(s, adm, "delete_agent", email)
+        s.commit()
+        return dict(ok=True)
+    finally:
+        s.close()
+
+
 class PasswordReq(BaseModel):
     password: str = ""       # 留空 = 发链接让对方自己设（推荐）
     notify: bool = True

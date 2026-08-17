@@ -309,3 +309,48 @@ def test_audit_export_can_filter_by_action(app_client, admin_token):
 def test_audit_export_requires_admin(app_client, agent_factory):
     tok, _ = agent_factory()
     assert app_client.get("/api/admin/audit/export", headers=H(tok)).status_code == 403
+
+
+# ── 删除账号（连数据一起清）───────────────────────────────────
+def test_delete_agent_needs_email_typed_and_wipes_everything(app_client, admin_token,
+                                                             agent_factory):
+    """误建重来的场景：删干净后同一个邮箱可以重新创建，且不带旧数据。"""
+    tok, email = agent_factory()
+    aid = _agent_id(app_client, admin_token, email)
+    app_client.post("/api/clients", headers=H(tok),
+                    json={"name": "会被清掉的客户", "phone": "", "notes": ""})
+
+    # 不打邮箱不给删
+    r = app_client.post(f"/api/admin/agents/{aid}/delete", headers=H(admin_token),
+                        json={})
+    assert r.status_code == 400 and email in r.json()["detail"]
+    assert app_client.get("/api/dashboard", headers=H(tok)).status_code == 200
+
+    r = app_client.post(f"/api/admin/agents/{aid}/delete", headers=H(admin_token),
+                        json={"confirm": email.upper()})
+    assert r.status_code == 200, "确认时大小写不该卡人"
+
+    # 旧 token 立刻失效，登录也不行了
+    assert app_client.get("/api/dashboard", headers=H(tok)).status_code in (401, 403)
+    assert app_client.post("/api/auth/login",
+                           json={"email": email, "password": "Agent-Pass-2026"}
+                           ).status_code in (401, 403)
+
+    # 同邮箱可重建，且是干净的
+    tok2, _ = agent_factory(email=email)
+    assert app_client.get("/api/clients", headers=H(tok2)).json() == []
+
+
+def test_delete_agent_requires_admin(app_client, admin_token, agent_factory):
+    tok, email = agent_factory()
+    aid = _agent_id(app_client, admin_token, email)
+    assert app_client.post(f"/api/admin/agents/{aid}/delete", headers=H(tok),
+                           json={"confirm": email}).status_code == 403
+
+
+def test_admin_account_cannot_be_deleted(app_client, admin_token):
+    rows = app_client.get("/api/admin/agents", headers=H(admin_token)).json()
+    adm = next(a for a in rows if a["role"] == "admin")
+    r = app_client.post(f"/api/admin/agents/{adm['id']}/delete", headers=H(admin_token),
+                        json={"confirm": adm["email"]})
+    assert r.status_code == 400
