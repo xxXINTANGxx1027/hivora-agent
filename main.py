@@ -1028,6 +1028,21 @@ def tg_status(aid: str = AID):
         s.close()
 
 
+@app.post("/api/telegram/connect-platform")
+def tg_connect_platform(aid: str = AID):
+    """一键接入官方共享 bot（无需 token）。"""
+    s = SessionLocal()
+    try:
+        out = telegram.connect_platform(s, aid)
+        db.audit(s, aid, "tg_connect_platform", out.get("username", ""))
+        s.commit()
+        return out
+    except telegram.TelegramError as e:
+        raise HTTPException(400, str(e))
+    finally:
+        s.close()
+
+
 @app.post("/api/telegram/connect")
 def tg_connect(req: TgConnectReq, aid: str = AID):
     s = SessionLocal()
@@ -1097,7 +1112,10 @@ async def tg_webhook(path_secret: str, request: Request):
         return {"ok": True}
     s = SessionLocal()
     try:
-        telegram.handle_update(s, path_secret, header, update)
+        if path_secret == "platform":
+            telegram.handle_platform_update(s, header, update)
+        else:
+            telegram.handle_update(s, path_secret, header, update)
     except Exception:
         log.exception("Telegram webhook 处理失败")
     finally:

@@ -3,7 +3,7 @@
 ## 项目是什么
 Hivora：马来西亚保险代理人 AI Copilot（closed SaaS，账号内部发放）。
 Python + FastAPI + LangGraph + SQLAlchemy 后端，单文件 HTML SPA 前端。
-线上：前端 Vercel（hivora-frontend.vercel.app）+ 后端 Render（hivora-agent-stage.onrender.com）。
+线上：前端 Vercel（hivora-insurance.vercel.app）+ 管理站 Vercel（hivora-admin.vercel.app）+ 后端 Render（hivora-agent-stage.onrender.com）。
 
 ## 接到一个工作包？
 先看 [WORKPLAN.md](WORKPLAN.md) —— 剩下的活拆成了独立的工作包，

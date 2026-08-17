@@ -1241,12 +1241,10 @@ async function loadTg(){
   $("#tg-body").innerHTML=`<div class="thinking">${t("loading")}</div>`;
   const st=await api("telegram");
   tgChatsBefore=(st.chats||[]).length;
-  $("#tg-body").innerHTML=st.connected?tgConnected(st):tgSetup();
+  $("#tg-body").innerHTML=st.connected?tgConnected(st):tgSetup(st);
 }
-function tgSetup(){
-  return `<div class="sub" style="margin-bottom:14px">
-      用你自己的 Telegram bot 随时问 Hivora：查条款、查客户保单、要话术、录客户 —— 不用开网页。
-      bot 是你自己的，客户看到的也是你的品牌。</div>
+function tgSetup(st){
+  const ownForm=`
     <div style="margin-bottom:10px"><span class="step-n">1</span>
       在 Telegram 里找 <b>@BotFather</b>，发 <code>/newbot</code>，按提示起个名字</div>
     <div style="margin-bottom:10px"><span class="step-n">2</span>
@@ -1255,18 +1253,46 @@ function tgSetup(){
       <input id="tg-token" placeholder="粘贴 bot token" style="flex:1" autocomplete="off">
       <button class="btn" onclick="tgConnect()">连接</button>
     </div>
-    <div class="merr" id="tg-err"></div>
     <div class="sub" style="margin-top:10px">token 会加密保存，页面上永远只显示后 4 位。</div>`;
+  if(!(st&&st.platform_available)){
+    /* 平台 bot 没配：只有自建一条路，保持原体验 */
+    return `<div class="sub" style="margin-bottom:14px">
+        用你自己的 Telegram bot 随时问 Hivora：查条款、查客户保单、要话术、录客户 —— 不用开网页。
+        bot 是你自己的，客户看到的也是你的品牌。</div>
+      ${ownForm}<div class="merr" id="tg-err"></div>`;
+  }
+  return `<div class="sub" style="margin-bottom:14px">
+      在 Telegram 里随时用 Hivora：查条款、查客户保单、要话术、录客户；
+      客户消息也从这里直接进你的收件箱。</div>
+    <div style="background:var(--hivora-light);border-radius:12px;padding:16px;margin-bottom:12px">
+      <div style="font-weight:650;margin-bottom:6px">⚡ 一键连接（推荐）</div>
+      <div class="sub" style="margin-bottom:10px">用 Hivora 官方 bot，不用建 bot、不用贴
+        token —— 点一下就好。</div>
+      <button class="btn" onclick="tgConnectPlatform(this)">连接官方 bot</button>
+    </div>
+    <details>
+      <summary style="cursor:pointer;font-size:13px;color:var(--dim);padding:4px 0">
+        用自己的 bot（白牌：客户看到你自己的品牌）</summary>
+      <div style="padding-top:10px">${ownForm}</div>
+    </details>
+    <div class="merr" id="tg-err"></div>`;
+}
+async function tgConnectPlatform(btn){
+  if(btn){btn.disabled=true;btn.textContent="连接中…";}
+  try{await post("telegram/connect-platform");loadTg();}
+  catch(e){$("#tg-err").textContent="连接失败，请稍后再试或联系管理员";
+    if(btn){btn.disabled=false;btn.textContent="连接官方 bot";}}
 }
 function tgConnected(st){
   const chats=(st.chats||[]).map(c=>`<div class="doc-row">📱 <b>${esc(c.name||c.chat_id)}</b>
       <span class="meta">${esc(c.created)}</span>
       <button class="icobtn" onclick="tgUnlink(${Number(c.id)})" aria-label="unlink">🗑</button>
     </div>`).join("");
-  const link=`https://t.me/${st.username}`;
+  const link=st.cust_link||`https://t.me/${st.username}`;
   return `<div class="doc-row" style="margin-bottom:14px">
       ✅ 已连接 <b>@${esc(st.username)}</b>
-      <span class="meta">token ${esc(st.token_hint)} · ${esc(st.since)}</span>
+      ${st.mode==="platform"?`<span class="pill blue" style="font-size:10px">官方 bot</span>`:""}
+      <span class="meta">${st.mode==="platform"?"":"token "+esc(st.token_hint)+" · "}${esc(st.since)}</span>
       <button class="btn ghost" style="padding:4px 10px;font-size:11px"
         onclick="tgDisconnect()">断开</button></div>
     <div style="background:var(--hivora-light);border-radius:10px;padding:12px 14px;
@@ -1278,7 +1304,7 @@ function tgConnected(st){
           onclick="navigator.clipboard.writeText('${esc(link)}');this.textContent='已复制'">复制</button>
       </div>
       <div class="sub" style="margin-top:6px">放进 WhatsApp 签名、Instagram 简介、名片。
-        客户点进来发消息 → 直接进你的收件箱，标成「新线索」。</div>
+        客户点进来发消息 → 直接进你的收件箱，标成「新线索」。${st.mode==="platform"?"这是你的专属链接，客户点它才会归到你名下。":""}</div>
     </div>
     <div style="margin-bottom:8px"><b style="font-size:13px">已绑定的设备（你自己的手机）</b></div>
     ${chats||`<span class="sub">还没有设备绑定。点下面拿绑定码。</span>`}

@@ -81,6 +81,18 @@ V0.1 全部推上生产并验证过：客户端已无管理代码、后端 build
 
 ## P0 · 发第一个付费账号之前
 
+- [ ] **建官方 Telegram bot，配 `PLATFORM_BOT_TOKEN`** · 你来 · 5 分钟
+      找 @BotFather 发 /newbot 建一个（比如 @HivoraAssistantBot），token 填进
+      Render Environment 的 `PLATFORM_BOT_TOKEN`。配好后代理人连 Telegram 变成
+      **一键接入**（不用自己建 bot 贴 token）；不配则只有自建 bot 一条路。
+      客户归属靠每个代理人的专属 /start 链接，陌生人不走链接绝不会被派给任何租户。
+
+- [ ] **建官方 Telegram bot，配 `PLATFORM_BOT_TOKEN`** · 你来 · 5 分钟
+      找 @BotFather 发 /newbot 建一个（比如 @HivoraAssistantBot），token 填进
+      Render Environment 的 `PLATFORM_BOT_TOKEN`。配好后代理人连 Telegram 变成
+      **一键接入**（不用自己建 bot 贴 token）；不配则只有自建 bot 一条路。
+      客户归属靠每个代理人的专属 /start 链接，陌生人不走链接绝不会被派给任何租户。
+
 - [ ] **Render 加 `PUBLIC_BASE_URL`** · 你来 · 2 分钟
       Telegram 要靠它回调。不配的话代理人点「连接 Telegram」直接报错，客户渠道整个不能用。
       ```

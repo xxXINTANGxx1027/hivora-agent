@@ -1,8 +1,15 @@
 """Telegram 入口 —— 客户的消息渠道 + 代理人自己的助手，共用一个 bot。
 
-每个代理人自己去 BotFather 建 bot，把 token 填进 Hivora。客户看到的是他自己
-品牌的 bot；你不用替任何人保管 token；一个 bot 只服务一个 agent_id，
-多租户天然隔离。
+两种接入模式：
+
+    platform（推荐，零配置）：平台方在 BotFather 建**一个**官方 bot，token 放
+        PLATFORM_BOT_TOKEN。代理人点一下就连上；客户通过代理人的专属
+        /start 链接进来，按链接归属到对应租户。
+    own（白牌）：代理人自己去 BotFather 建 bot、贴 token。客户看到的是
+        他自己品牌的 bot；平台不保管他的 token。
+
+own 模式一个 bot 只服务一个 agent_id；platform 模式一个 bot 服务所有租户，
+靠 chat→租户 的绑定关系隔离（设备=TelegramChat，客户=Thread.tg_chat_id）。
 
 同一个 bot 服务两种人，靠有没有绑过码来分：
 
@@ -108,6 +115,31 @@ def send(token: str, chat_id: str, text: str):
             return
 
 
+# ── 官方共享 bot（平台模式）──────────────────────────────────
+def platform_token() -> str:
+    return os.environ.get("PLATFORM_BOT_TOKEN", "").strip()
+
+
+def platform_available() -> bool:
+    return bool(platform_token())
+
+
+def platform_header_secret() -> str:
+    """平台 webhook 的校验头。由 SECRET_KEY 派生，稳定且不入库。"""
+    import auth
+    return hashlib.sha256(b"tg-platform:" + auth.SECRET).hexdigest()[:40]
+
+
+def bot_token(bot) -> str:
+    """按模式取真正可用的 token。platform 行的 token_enc 是空的。"""
+    if (getattr(bot, "mode", "own") or "own") == "platform":
+        tok = platform_token()
+        if not tok:
+            raise TelegramError("官方 bot 未配置（PLATFORM_BOT_TOKEN），请联系管理员。")
+        return tok
+    return decrypt(bot.token_enc)
+
+
 # ── 连接 / 断开 ───────────────────────────────────────────────
 def public_base() -> str:
     base = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
@@ -148,14 +180,48 @@ def connect(s, agent_id: str, token: str) -> dict:
     return dict(username=username)
 
 
+def connect_platform(s, agent_id: str) -> dict:
+    """一键接入官方共享 bot：不要 token、不用 BotFather，点一下就好。"""
+    tok = platform_token()
+    if not tok:
+        raise TelegramError("官方 bot 暂未开通。可以先用「自己的 bot」方式连接，"
+                            "或让管理员配置 PLATFORM_BOT_TOKEN。")
+    base = public_base()
+    me = call(tok, "getMe")
+    username = me.get("username") or ""
+
+    row = s.query(db.TelegramBot).filter_by(agent_id=agent_id).first()
+    if row is None:
+        row = db.TelegramBot(agent_id=agent_id)
+        s.add(row)
+    row.mode = "platform"
+    row.username = username
+    row.token_enc = ""                       # 平台模式不存任何 token
+    row.path_secret = row.path_secret or ("p-" + secrets.token_urlsafe(24))
+    row.header_secret = platform_header_secret()
+    row.cust_code = getattr(row, "cust_code", "") or ("C" + secrets.token_hex(5).upper())
+    row.connected = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    # 平台 webhook 是全局共享的一条，重复注册无害（幂等）
+    call(tok, "setWebhook", {
+        "url": f"{base}/api/tg/platform",
+        "secret_token": platform_header_secret(),
+        "allowed_updates": ["message"],
+    })
+    s.commit()
+    return dict(username=username, mode="platform")
+
+
 def disconnect(s, agent_id: str):
     row = s.query(db.TelegramBot).filter_by(agent_id=agent_id).first()
     if not row:
         return
-    try:
-        call(decrypt(row.token_enc), "deleteWebhook", {"drop_pending_updates": True})
-    except Exception:
-        log.warning("deleteWebhook 失败，仍然继续删除本地记录", exc_info=True)
+    if (getattr(row, "mode", "own") or "own") != "platform":
+        # 只有自建 bot 才删 webhook；平台 bot 是所有租户共享的，动不得
+        try:
+            call(decrypt(row.token_enc), "deleteWebhook", {"drop_pending_updates": True})
+        except Exception:
+            log.warning("deleteWebhook 失败，仍然继续删除本地记录", exc_info=True)
     s.query(db.TelegramChat).filter_by(agent_id=agent_id).delete()
     s.query(db.TelegramBind).filter_by(agent_id=agent_id).delete()
     s.delete(row)
@@ -166,10 +232,19 @@ def status(s, agent_id: str) -> dict:
     row = s.query(db.TelegramBot).filter_by(agent_id=agent_id).first()
     chats = s.query(db.TelegramChat).filter_by(agent_id=agent_id).all()
     if not row:
-        return dict(connected=False, chats=[])
+        return dict(connected=False, chats=[], platform_available=platform_available())
+    mode = getattr(row, "mode", "own") or "own"
+    if mode == "platform":
+        hint = "官方 bot"
+        cust_link = (f"https://t.me/{row.username}?start={row.cust_code}"
+                     if row.username and getattr(row, "cust_code", "") else "")
+    else:
+        # 只回最后 4 位，够用来确认"是不是我填的那个"，泄漏了也没用
+        hint = "…" + decrypt(row.token_enc)[-4:]
+        cust_link = f"https://t.me/{row.username}" if row.username else ""
     return dict(connected=True, username=row.username, since=row.connected,
-                # 只回最后 4 位，够用来确认"是不是我填的那个"，泄漏了也没用
-                token_hint="…" + decrypt(row.token_enc)[-4:],
+                mode=mode, token_hint=hint, cust_link=cust_link,
+                platform_available=platform_available(),
                 chats=[dict(id=c.id, chat_id=c.chat_id, name=c.name,
                             created=c.created) for c in chats])
 
@@ -255,7 +330,7 @@ def _customer_message(s, bot, chat_id: str, name: str, text: str) -> None:
     db.audit(s, bot.agent_id, "tg_customer_msg", f"chat={chat_id} {text[:60]}")
     s.commit()
 
-    token = decrypt(bot.token_enc)
+    token = bot_token(bot)
     brand = db.brand_of(bot.agent_id)
 
     reply, why = (None, "该账号关掉了自动回复")
@@ -298,7 +373,7 @@ def send_to_chat(s, agent_id: str, chat_id: str, text: str) -> bool:
     bot = s.query(db.TelegramBot).filter_by(agent_id=agent_id).first()
     if not bot or not chat_id:
         return False
-    send(decrypt(bot.token_enc), chat_id, text)
+    send(bot_token(bot), chat_id, text)
     return True
 
 
@@ -323,7 +398,7 @@ def handle_update(s, path_secret: str, header_secret: str, update: dict) -> None
         return
     name = " ".join(x for x in (chat.get("first_name"), chat.get("last_name")) if x) \
         or chat.get("username") or ""
-    token = decrypt(bot.token_enc)
+    token = bot_token(bot)
 
     # /start <code> 或直接发绑定码
     if text.startswith("/start"):
@@ -348,6 +423,11 @@ def handle_update(s, path_secret: str, header_secret: str, update: dict) -> None
             _customer_message(s, bot, chat_id, name, text)
         return
 
+    _linked_message(s, bot, token, chat_id, text)
+
+
+def _linked_message(s, bot, token: str, chat_id: str, text: str) -> None:
+    """已绑定设备（代理人本人）的消息。own / platform 两种 webhook 共用。"""
     if text == "/unlink":
         s.query(db.TelegramChat).filter_by(agent_id=bot.agent_id,
                                            chat_id=chat_id).delete()
@@ -375,3 +455,114 @@ def handle_update(s, path_secret: str, header_secret: str, update: dict) -> None
         log.exception("Telegram 处理失败 agent=%s", bot.agent_id)
         answer = "出了点问题，请稍后再试。"
     send(token, chat_id, answer)
+
+
+def _platform_bot_of(s, agent_id: str):
+    row = s.query(db.TelegramBot).filter_by(agent_id=agent_id).first()
+    return row if row and (getattr(row, "mode", "own") or "own") == "platform" else None
+
+
+def _customer_start(s, bot, chat_id: str, name: str) -> None:
+    """客户第一次点专属链接进来：建 thread、发品牌欢迎语（写死文案，非 AI）。"""
+    t = (s.query(db.Thread)
+         .filter_by(agent_id=bot.agent_id, tg_chat_id=chat_id).first())
+    if t is None:
+        t = db.Thread(agent_id=bot.agent_id, client=name or f"TG {chat_id}",
+                      lang="中文", channel="telegram", tg_chat_id=chat_id,
+                      status="pending", unread=0)
+        s.add(t)
+    db.audit(s, bot.agent_id, "tg_cust_start", f"chat={chat_id} {name}")
+    s.commit()
+    brand = db.brand_of(bot.agent_id)
+    send(platform_token(), chat_id,
+         f"你好，这里是 {brand} 👋 有什么可以帮你的，直接留言就行。")
+
+
+def handle_platform_update(s, header_secret: str, update: dict) -> None:
+    """官方共享 bot 的回调。一个 webhook 服务所有 platform 模式的租户。
+
+    路由规则（顺序即优先级）：
+      /start <客户码>   → 归属该租户的客户，建 thread + 欢迎语
+      /start <绑定码>   → 代理人设备绑定（码本身带租户）
+      已绑定的设备      → 助手模式（_linked_message）
+      已有 thread 的客户 → 客户消息（_customer_message，混合自动回复照常）
+      其余              → 固定提示去要专属链接；绝不当成任何租户的客户
+    """
+    if not platform_available():
+        log.warning("收到平台 webhook 但 PLATFORM_BOT_TOKEN 未配置")
+        return
+    if not secrets.compare_digest((header_secret or "").encode("utf-8", "replace"),
+                                  platform_header_secret().encode()):
+        log.warning("平台 webhook secret 不匹配")
+        return
+
+    msg = (update or {}).get("message") or {}
+    chat = msg.get("chat") or {}
+    chat_id = str(chat.get("id") or "")
+    text = (msg.get("text") or "").strip()
+    if not chat_id or not text:
+        return
+    name = " ".join(x for x in (chat.get("first_name"), chat.get("last_name")) if x) \
+        or chat.get("username") or ""
+    tok = platform_token()
+
+    def _try_bind(code: str) -> bool:
+        b = s.query(db.TelegramBind).filter_by(code=code.strip().upper()).first()
+        if not b:
+            return False
+        bot = _platform_bot_of(s, b.agent_id)
+        if not bot:
+            send(tok, chat_id, "这个绑定码不属于官方 bot。")
+            return True
+        send(tok, chat_id, _bind(s, b.agent_id, code, chat_id, name))
+        return True
+
+    if text.startswith("/start"):
+        arg = text[6:].strip()
+        if arg:
+            row = (s.query(db.TelegramBot)
+                   .filter_by(cust_code=arg, mode="platform").first())
+            if row:
+                _customer_start(s, row, chat_id, name)
+                return
+            if _try_bind(arg):
+                return
+            send(tok, chat_id, "链接无效或已过期。请向你的代理人要一个新的链接。")
+            return
+        # 无参数 /start：已绑设备给帮助；已是某租户客户给欢迎；否则指路
+        linked = s.query(db.TelegramChat).filter_by(chat_id=chat_id).first()
+        if linked and _platform_bot_of(s, linked.agent_id):
+            send(tok, chat_id, HELP)
+            return
+        t = (s.query(db.Thread)
+             .filter(db.Thread.tg_chat_id == chat_id,
+                     db.Thread.channel == "telegram").first())
+        if t and _platform_bot_of(s, t.agent_id):
+            send(tok, chat_id, CUSTOMER_ACK)
+            return
+        send(tok, chat_id, "你好 👋 请通过你的保险代理人发给你的专属链接开始对话。")
+        return
+
+    # 设备（代理人本人）？
+    for c in s.query(db.TelegramChat).filter_by(chat_id=chat_id).all():
+        bot = _platform_bot_of(s, c.agent_id)
+        if bot:
+            _linked_message(s, bot, tok, chat_id, text)
+            return
+
+    # 直接打了绑定码？
+    if text.upper().startswith("HV") and len(text.strip()) <= 10:
+        if _try_bind(text):
+            return
+
+    # 已有归属的客户？
+    for t in (s.query(db.Thread)
+              .filter(db.Thread.tg_chat_id == chat_id,
+                      db.Thread.channel == "telegram").all()):
+        bot = _platform_bot_of(s, t.agent_id)
+        if bot:
+            _customer_message(s, bot, chat_id, name, text)
+            return
+
+    # 谁都不是：不能猜租户，指路要链接
+    send(tok, chat_id, "你好 👋 请通过你的保险代理人发给你的专属链接开始对话。")

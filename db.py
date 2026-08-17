@@ -137,6 +137,8 @@ class TelegramBot(Base):
     path_secret = Column(String(64), unique=True, index=True)   # webhook 路径片段
     header_secret = Column(String(64))                # Telegram 回传的校验头
     connected = Column(String(24), default="")
+    mode = Column(String(16), default="own")          # own=自建 bot / platform=官方共享 bot
+    cust_code = Column(String(24), default="")        # 平台模式下客户专属 /start 码（长期有效）
 
 
 class TelegramChat(Base):
@@ -455,6 +457,8 @@ def migrate_columns():
             "ALTER TABLE threads ADD COLUMN channel VARCHAR(16) DEFAULT 'manual'",
             "ALTER TABLE threads ADD COLUMN tg_chat_id VARCHAR(32) DEFAULT ''",
             "ALTER TABLE threads ADD COLUMN client_id INTEGER",
+            "ALTER TABLE telegram_bots ADD COLUMN mode VARCHAR(16) DEFAULT 'own'",
+            "ALTER TABLE telegram_bots ADD COLUMN cust_code VARCHAR(24) DEFAULT ''",
         ]:
             try:
                 conn.execute(text(ddl))
