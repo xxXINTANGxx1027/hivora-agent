@@ -184,7 +184,7 @@ V0.1 全部推上生产并验证过：客户端已无管理代码、后端 build
 | `DATABASE_URL` | ✅ 已配 | 拒绝启动 |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | ✅ 已配 | 没有管理员则拒绝启动 |
 | `ALLOWED_ORIGINS` | ✅ 已配 | 拒绝启动；漏了管理站域名则登录没反应 |
-| `HIVORA_ENV` | ❓ 推完才知道 | 不设则所有生产守卫都不生效 |
+| `HIVORA_ENV` | ✅ 已配（2026-08-17 经线上 HSTS 头实证） | 不设则所有生产守卫都不生效 |
 | `PUBLIC_BASE_URL` | ❌ 未配 | Telegram 连不上，客户渠道不能用 |
 | `SENTRY_DSN` | ❌ 未配 | 线上报错你不会知道 |
 
