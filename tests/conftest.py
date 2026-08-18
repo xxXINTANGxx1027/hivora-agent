@@ -36,6 +36,10 @@ os.environ.pop("OPENROUTER_API_KEY", None)   # 测试绝不打真实模型
 # pop 掉反而会被开发机 .env 里的真 token 灌回来。
 os.environ["PLATFORM_BOT_TOKEN"] = ""
 os.environ.pop("HIVORA_ENV", None)
+# 全套测试一分钟内会从同一个"IP"发几百个请求，别让限速把别的用例误伤；
+# 限速本身的用例自己 monkeypatch main.RL_* 来收紧。
+os.environ["RATE_LIMIT_PER_MIN"] = "1000000"
+os.environ["RATE_LIMIT_AUTH_PER_MIN"] = "1000000"
 
 
 @pytest.fixture(scope="session", autouse=True)

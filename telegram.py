@@ -252,13 +252,36 @@ def status(s, agent_id: str) -> dict:
 
 def new_bind_code(s, agent_id: str, ttl: int = None) -> str:
     """ttl 默认 10 分钟（代理人自己当场绑）。白手套交付时管理员代生成的链接
-    要经 WhatsApp 转给客户，给长一点——但它等于客户的身份，不能无限期。"""
+    要经 WhatsApp 转给客户，给长一点——但它等于客户的身份，不能无限期。
+    长效码没人手打（都在链接里），所以加长到 14 位十六进制抗猜测；
+    短效码保持 6 位方便当场手打，靠 10 分钟 TTL + 猜错节流兜底。"""
     s.query(db.TelegramBind).filter(db.TelegramBind.expires < time.time()).delete()
-    code = "HV" + secrets.token_hex(3).upper()
+    n = 7 if (ttl or BIND_TTL) > BIND_TTL else 3
+    code = "HV" + secrets.token_hex(n).upper()
     s.add(db.TelegramBind(code=code, agent_id=agent_id,
                           expires=time.time() + (ttl or BIND_TTL)))
     s.commit()
     return code
+
+
+# 绑定码/客户码猜错节流：同一个 chat 猜错 5 次锁 5 分钟。
+# 进程内存就够 —— 单实例部署，重启清零也无所谓（攻击者还得重新累计）。
+_GUESS_FAILS: dict = {}
+
+
+def _guess_locked(chat_id: str) -> bool:
+    row = _GUESS_FAILS.get(chat_id)
+    return bool(row and row[0] >= 5 and time.time() < row[1])
+
+
+def _note_guess_fail(chat_id: str):
+    if len(_GUESS_FAILS) > 5000:      # 防内存被撑爆
+        _GUESS_FAILS.clear()
+    row = _GUESS_FAILS.setdefault(chat_id, [0, 0.0])
+    if time.time() > row[1]:
+        row[0] = 0
+    row[0] += 1
+    row[1] = time.time() + 300
 
 
 def unlink_chat(s, agent_id: str, row_id: int):
@@ -284,11 +307,15 @@ HELP = ("我是你的 Hivora 助手。直接问就行：\n"
 
 
 def _bind(s, agent_id_of_bot: str, code: str, chat_id: str, name: str) -> str:
+    if _guess_locked(chat_id):
+        return "尝试次数太多，请 5 分钟后再试。"
     row = s.query(db.TelegramBind).filter_by(code=code.strip().upper()).first()
     if not row or row.expires < time.time():
+        _note_guess_fail(chat_id)
         return "绑定码无效或已过期。到 Hivora 网页版重新生成一个。"
     if row.agent_id != agent_id_of_bot:
         # 拿别人的码来绑自己的 bot，不给过
+        _note_guess_fail(chat_id)
         return "这个绑定码不属于这个 bot。"
     exists = (s.query(db.TelegramChat)
               .filter_by(agent_id=row.agent_id, chat_id=chat_id).first())
@@ -524,6 +551,9 @@ def handle_platform_update(s, header_secret: str, update: dict) -> None:
     if text.startswith("/start"):
         arg = text[6:].strip()
         if arg:
+            if _guess_locked(chat_id):
+                send(tok, chat_id, "尝试次数太多，请 5 分钟后再试。")
+                return
             row = (s.query(db.TelegramBot)
                    .filter_by(cust_code=arg, mode="platform").first())
             if row:
@@ -531,6 +561,7 @@ def handle_platform_update(s, header_secret: str, update: dict) -> None:
                 return
             if _try_bind(arg):
                 return
+            _note_guess_fail(chat_id)
             send(tok, chat_id, "链接无效或已过期。请向你的代理人要一个新的链接。")
             return
         # 无参数 /start：已绑设备给帮助；已是某租户客户给欢迎；否则指路

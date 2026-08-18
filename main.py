@@ -80,7 +80,38 @@ async def observability(request: Request, call_next):
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["Referrer-Policy"] = "same-origin"
     resp.headers["X-Frame-Options"] = "DENY"
+    if db.IS_PROD:
+        resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return resp
+
+
+# ── 每 IP 限速 ────────────────────────────────────────────────
+# 登录锁只防按账号爆破；这里再兜一层按 IP 的总闸，扫描器/脚本打不穿。
+# 进程内存实现——单实例部署够用；上多实例时换 Redis，先别过度设计。
+RL_MAX = int(os.environ.get("RATE_LIMIT_PER_MIN", "240"))
+RL_AUTH_MAX = int(os.environ.get("RATE_LIMIT_AUTH_PER_MIN", "20"))
+_RL: dict = {}
+
+
+@app.middleware("http")
+async def rate_limit(request: Request, call_next):
+    path = request.url.path
+    # webhook 有自己的双 secret 校验，且来源是 Telegram 的机房，不按 IP 限
+    if path.startswith("/api/") and not path.startswith("/api/tg/"):
+        ip = (request.headers.get("x-forwarded-for")
+              or (request.client.host if request.client else "?")).split(",")[0].strip()
+        is_auth = path.startswith("/api/auth/")
+        bucket = int(time.time() // 60)
+        if len(_RL) > 10000:
+            _RL.clear()
+        cnt, b = _RL.get((ip, is_auth), (0, bucket))
+        if b != bucket:
+            cnt, b = 0, bucket
+        cnt += 1
+        _RL[(ip, is_auth)] = (cnt, b)
+        if cnt > (RL_AUTH_MAX if is_auth else RL_MAX):
+            return JSONResponse({"detail": "请求太频繁，请稍后再试"}, status_code=429)
+    return await call_next(request)
 
 # CORS：生产必须显式列出前端域名，不能是 *。
 _origins = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
